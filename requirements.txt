@@ -1,0 +1,9 @@
+# Core brain (brain.py) — LLM via a local Anthropic-compatible proxy
+anthropic>=0.40
+python-dotenv>=1.0                    # optional, loads a local .env
+
+# Telegram frontend (pa.py) — not needed to run the web UI (web.py)
+python-telegram-bot[job-queue]>=22
+
+# Tests
+pytest>=8

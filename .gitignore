@@ -1,0 +1,12 @@
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# runtime data — per-user SQLite DB, WAL/SHM files
+data/
+*.db
+*.db-wal
+*.db-shm
+
+.env
