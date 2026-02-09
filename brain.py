@@ -7,6 +7,8 @@ web.py (local UI) — built incrementally across stages 5-7 of the rebuild.
 import os
 import re
 import json
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import anthropic
 
@@ -66,3 +68,79 @@ def human_duration(seconds: int) -> str:
     if mins == 0:
         return f"{hours} hour{'s' if hours != 1 else ''}"
     return f"{hours}h {mins}m"
+
+
+# ── Structured extraction (one call → every bucket) ─────────────────────────
+def extract(user_msg: str, assistant_msg: str, store, tz: ZoneInfo) -> dict:
+    now = datetime.now(tz)
+    open_tasks = [t["task"] for t in store.open_tasks()]
+    habit_names = [h["name"] for h in store.active_habits()]
+
+    prompt = (
+        f"Current time: {now.strftime('%A %Y-%m-%d %H:%M')} ({tz}).\n\n"
+        "You are the memory engine of a personal assistant. From the user+assistant turn "
+        "below, extract anything worth tracking long-term. Be liberal about LOGGING measurable "
+        "things (any category is allowed — health, fitness, sleep, food, money, study, work, "
+        "mood, anything) but conservative about PROFILE facts (only stable, identity-level info).\n\n"
+        "Return ONLY valid JSON, no prose:\n"
+        "{\n"
+        '  "facts": ["stable third-person fact about the user"],\n'
+        '  "log": [{"category":"...","key":"snake_case_metric","value":<number or string>,"unit":"...","note":"..."}],\n'
+        '  "tasks_new": [{"task":"...","due":"ISO8601 or null"}],\n'
+        '  "tasks_done": ["substring of an existing open task the user just finished"],\n'
+        '  "habits_done": ["name of a recurring habit the user did today"],\n'
+        '  "mood": {"score": <1-10>, "note": "..."} or null\n'
+        "}\n"
+        "Rules: omit empty arrays' contents rather than inventing. Resolve relative dates "
+        "('tomorrow 6pm') to absolute ISO8601 in the user's timezone. Use null for unknown due. "
+        "habits = things done repeatedly (running, journaling, gym, meditation). "
+        "Skip greetings/small talk.\n\n"
+        f"EXISTING OPEN TASKS: {open_tasks}\n"
+        f"KNOWN HABITS: {habit_names}\n\n"
+        f"User: {user_msg}\nAssistant: {assistant_msg}"
+    )
+    data = parse_json(call_llm([{"role": "user", "content": prompt}], temperature=0.1, max_tokens=600))
+    return data if isinstance(data, dict) else {}
+
+
+def apply_extraction(store, data: dict) -> dict:
+    changed = {"facts": [], "log": [], "tasks": [], "done": [], "habits": [], "mood": None}
+    if not data:
+        return changed
+    if isinstance(data.get("facts"), list):
+        changed["facts"] = store.add_facts([f for f in data["facts"] if isinstance(f, str)])
+    if isinstance(data.get("log"), list):
+        changed["log"] = store.add_log([e for e in data["log"] if isinstance(e, dict)])
+    if isinstance(data.get("tasks_new"), list):
+        changed["tasks"] = store.add_tasks([e for e in data["tasks_new"] if isinstance(e, dict)])
+    if isinstance(data.get("tasks_done"), list):
+        changed["done"] = store.complete_tasks([m for m in data["tasks_done"] if isinstance(m, str)])
+    if isinstance(data.get("habits_done"), list):
+        for name in data["habits_done"]:
+            if isinstance(name, str) and name.strip():
+                changed["habits"].append(store.log_habit(name))
+    mood = data.get("mood")
+    if isinstance(mood, dict) and mood.get("score") is not None:
+        try:
+            changed["mood"] = store.add_journal(int(mood["score"]), mood.get("note", ""))
+        except (TypeError, ValueError):
+            pass
+    return changed
+
+
+# ── Reminder detection ──────────────────────────────────────────────────────
+def detect_reminder(user_msg: str, tz: ZoneInfo) -> dict | None:
+    now = datetime.now(tz)
+    prompt = (
+        f"Current date and time: {now.strftime('%A, %Y-%m-%d %H:%M')} ({tz})\n\n"
+        "Does the message ask to be reminded about something ('remind me', 'don't let me "
+        "forget', 'alert me', 'ping me')?\n\n"
+        f"Message: {user_msg}\n\n"
+        'If YES, respond with JSON only: {"is_reminder": true, "task": "<what>", "seconds_from_now": <int>}\n'
+        "Compute seconds precisely (30 min=1800, 2 h=7200, 'tomorrow 9am'=seconds until then).\n"
+        'If NO: {"is_reminder": false}'
+    )
+    data = parse_json(call_llm([{"role": "user", "content": prompt}], temperature=0.0, max_tokens=150))
+    if isinstance(data, dict) and data.get("is_reminder") and data.get("task") and data.get("seconds_from_now", 0) > 0:
+        return {"task": data["task"], "seconds": int(data["seconds_from_now"])}
+    return None
