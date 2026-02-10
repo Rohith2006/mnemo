@@ -7,7 +7,7 @@ web.py (local UI) — built incrementally across stages 5-7 of the rebuild.
 import os
 import re
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import anthropic
@@ -144,3 +144,72 @@ def detect_reminder(user_msg: str, tz: ZoneInfo) -> dict | None:
     if isinstance(data, dict) and data.get("is_reminder") and data.get("task") and data.get("seconds_from_now", 0) > 0:
         return {"task": data["task"], "seconds": int(data["seconds_from_now"])}
     return None
+
+
+# ── Reply generation ────────────────────────────────────────────────────────
+def build_reply(store, user_message, history, tz, pending_reminders=None, new_reminder=None) -> str:
+    pending = pending_reminders or []
+    if pending:
+        r_lines = [
+            f'  - "{r["task"]}" fires {r["fire_at_dt"].astimezone(tz).strftime("%H:%M on %a %d %b")}'
+            for r in pending
+        ]
+        reminders_block = "PENDING REMINDERS (already scheduled):\n" + "\n".join(r_lines)
+    else:
+        reminders_block = "PENDING REMINDERS: none."
+
+    system_prompt = (
+        f"You are a warm, proactive personal assistant. It is "
+        f"{datetime.now(tz).strftime('%A %H:%M')} for the user.\n"
+        "You actively track the user's life and help them stay organized. Reminders and memory are "
+        "handled automatically by the system behind the scenes — NEVER say you can't track time or "
+        "set reminders, and never claim you've saved or scheduled anything yourself.\n"
+        "IMPORTANT: Reply with plain conversational text ONLY. You do NOT have tools and you do NOT "
+        "write files. Never output 'Tool use', file paths, code fences for memory, or any narration "
+        "of actions — just talk to the user naturally.\n"
+        "Use what you know to personalize, give concrete suggestions, and gently coach — but NEVER "
+        "fabricate facts. When the user shares info, acknowledge it warmly. Light markdown is fine.\n\n"
+        f"=== WHAT YOU KNOW ===\n{store.summary()}\n=====================\n\n"
+        f"=== {reminders_block}\n====================="
+    )
+    if new_reminder:
+        fire_local = (datetime.now().astimezone() + timedelta(seconds=new_reminder["seconds"])).astimezone(tz)
+        system_prompt += (
+            f"\n\nSYSTEM ACTION: reminder saved — \"{new_reminder['task']}\" fires in "
+            f"{human_duration(new_reminder['seconds'])} at {fire_local.strftime('%H:%M')}. Confirm it."
+        )
+
+    messages = [{"role": "system", "content": system_prompt}] + (history or []) + [
+        {"role": "user", "content": user_message}
+    ]
+    return call_llm(messages, temperature=0.7, max_tokens=1024)
+
+
+# ── Digests / insights ──────────────────────────────────────────────────────
+def build_digest(store, tz: ZoneInfo, kind: str) -> str:
+    now = datetime.now(tz)
+    facts = {
+        "now": now.strftime("%A %Y-%m-%d %H:%M"),
+        "snapshot": store.summary(),
+        "trends": store.trends(),
+        "overdue_tasks": [t["task"] for t in store.overdue_tasks(tz)],
+        "due_next_24h": [f'{t["task"]} @ {t["due_dt"].strftime("%H:%M %a")}' for t in store.tasks_due_within(24, tz)],
+        "streaks_at_risk": [f'{h["name"]} (day {h["streak"]})' for h in store.habits_at_risk(tz)],
+    }
+    if kind == "morning":
+        ask = ("Write a SHORT morning briefing. One-line greeting, then what's on today (due tasks, "
+               "reminders), any streaks to protect, and ONE concrete suggestion. Warm, scannable.")
+    elif kind == "evening":
+        ask = ("Write a SHORT evening review. Reflect on what was logged today, surface ONE genuine "
+               "pattern/insight from the data, note anything unfinished for tomorrow, end with light "
+               "encouragement. Honest, not flattering.")
+    else:
+        ask = ("Give a concise insights update: the most useful patterns in this data right now and "
+               "1-2 concrete, specific suggestions to make life more organized. No fluff.")
+    prompt = (
+        "You are a proactive personal assistant messaging the user unprompted. Use ONLY the data "
+        "below; never invent facts. If there's little to say, keep it to a line or two. Warm tone, "
+        "light markdown and emoji.\n\n"
+        f"{ask}\n\nDATA:\n{json.dumps(facts, indent=2, ensure_ascii=False)}"
+    )
+    return call_llm([{"role": "user", "content": prompt}], temperature=0.6, max_tokens=500)

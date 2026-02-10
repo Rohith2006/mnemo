@@ -1,5 +1,6 @@
 """Tests for brain.py's pure/mockable core — no network calls."""
 
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import brain
@@ -206,3 +207,147 @@ def test_detect_reminder_returns_none_when_task_missing(monkeypatch):
         lambda *a, **k: '{"is_reminder": true, "seconds_from_now": 1800}',
     )
     assert brain.detect_reminder("remind me", TZ) is None
+
+
+# ── build_reply (mocked LLM) ───────────────────────────────────────────────────
+def test_build_reply_includes_summary_and_pending_reminders(monkeypatch):
+    s = store.get_store("u1")
+    s.add_facts(["Lives in Bengaluru"])
+
+    captured = {}
+
+    def fake_call_llm(messages, **kwargs):
+        captured["messages"] = messages
+        return "Hey there!"
+
+    monkeypatch.setattr(brain, "call_llm", fake_call_llm)
+
+    pending = [{"task": "call mom", "fire_at_dt": datetime.now(TZ) + timedelta(hours=1)}]
+    reply = brain.build_reply(s, "hello", [], TZ, pending_reminders=pending)
+
+    assert reply == "Hey there!"
+    system_prompt = captured["messages"][0]["content"]
+    assert "Lives in Bengaluru" in system_prompt
+    assert "call mom" in system_prompt
+    assert captured["messages"][-1] == {"role": "user", "content": "hello"}
+
+
+def test_build_reply_says_none_when_no_pending_reminders(monkeypatch):
+    s = store.get_store("u1")
+    captured = {}
+
+    def fake_call_llm(messages, **kwargs):
+        captured["messages"] = messages
+        return "ok"
+
+    monkeypatch.setattr(brain, "call_llm", fake_call_llm)
+    brain.build_reply(s, "hi", [], TZ)
+    assert "PENDING REMINDERS: none." in captured["messages"][0]["content"]
+
+
+def test_build_reply_includes_system_action_for_new_reminder(monkeypatch):
+    s = store.get_store("u1")
+    captured = {}
+
+    def fake_call_llm(messages, **kwargs):
+        captured["messages"] = messages
+        return "Got it!"
+
+    monkeypatch.setattr(brain, "call_llm", fake_call_llm)
+    brain.build_reply(s, "remind me to call mom in 30 min", [], TZ,
+                       new_reminder={"task": "call mom", "seconds": 1800})
+
+    system_prompt = captured["messages"][0]["content"]
+    assert "SYSTEM ACTION" in system_prompt
+    assert "call mom" in system_prompt
+    assert "30 minutes" in system_prompt
+
+
+def test_build_reply_places_history_between_system_and_user_message(monkeypatch):
+    s = store.get_store("u1")
+    captured = {}
+
+    def fake_call_llm(messages, **kwargs):
+        captured["messages"] = messages
+        return "ok"
+
+    monkeypatch.setattr(brain, "call_llm", fake_call_llm)
+    history = [{"role": "user", "content": "earlier msg"}, {"role": "assistant", "content": "earlier reply"}]
+    brain.build_reply(s, "now what", history, TZ)
+
+    messages = captured["messages"]
+    assert messages[0]["role"] == "system"
+    assert messages[1:3] == history
+    assert messages[3] == {"role": "user", "content": "now what"}
+
+
+# ── build_digest (mocked LLM) ──────────────────────────────────────────────────
+def test_build_digest_morning_uses_briefing_instruction(monkeypatch):
+    s = store.get_store("u1")
+    captured = {}
+
+    def fake_call_llm(messages, **kwargs):
+        captured["prompt"] = messages[0]["content"]
+        return "Good morning!"
+
+    monkeypatch.setattr(brain, "call_llm", fake_call_llm)
+    assert brain.build_digest(s, TZ, "morning") == "Good morning!"
+    assert "morning briefing" in captured["prompt"].lower()
+
+
+def test_build_digest_evening_uses_review_instruction(monkeypatch):
+    s = store.get_store("u1")
+    captured = {}
+
+    def fake_call_llm(messages, **kwargs):
+        captured["prompt"] = messages[0]["content"]
+        return "Evening!"
+
+    monkeypatch.setattr(brain, "call_llm", fake_call_llm)
+    brain.build_digest(s, TZ, "evening")
+    assert "evening review" in captured["prompt"].lower()
+
+
+def test_build_digest_ondemand_uses_insights_instruction(monkeypatch):
+    s = store.get_store("u1")
+    captured = {}
+
+    def fake_call_llm(messages, **kwargs):
+        captured["prompt"] = messages[0]["content"]
+        return "Insights!"
+
+    monkeypatch.setattr(brain, "call_llm", fake_call_llm)
+    brain.build_digest(s, TZ, "ondemand")
+    assert "insights update" in captured["prompt"].lower()
+
+
+def test_build_digest_embeds_trends_overdue_due_soon_and_at_risk_streaks(monkeypatch):
+    s = store.get_store("u1")
+    s.add_log([{"key": "weight", "value": 82}])
+    s.add_log([{"key": "weight", "value": 75}])
+
+    past = (datetime.now(TZ) - timedelta(hours=1)).isoformat()
+    soon = (datetime.now(TZ) + timedelta(hours=2)).isoformat()
+    s.add_tasks([{"task": "Overdue thing", "due": past}])
+    s.add_tasks([{"task": "Due soon thing", "due": soon}])
+
+    s.log_habit("Running")
+    h = s._find_habit("Running")
+    yesterday = (datetime.now(TZ).date() - timedelta(days=1)).isoformat()
+    s.conn.execute("UPDATE habits SET last_done=? WHERE id=?", (yesterday, h["id"]))
+    s.conn.commit()
+
+    captured = {}
+
+    def fake_call_llm(messages, **kwargs):
+        captured["prompt"] = messages[0]["content"]
+        return "Update!"
+
+    monkeypatch.setattr(brain, "call_llm", fake_call_llm)
+    brain.build_digest(s, TZ, "ondemand")
+
+    prompt = captured["prompt"]
+    assert "Overdue thing" in prompt
+    assert "Due soon thing" in prompt
+    assert "Running" in prompt
+    assert "weight" in prompt
