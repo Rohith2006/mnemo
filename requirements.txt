@@ -1,9 +1,15 @@
-# Core brain (brain.py) — LLM via a local Anthropic-compatible proxy
+# Core brain (brain.py) — LLM via Anthropic or Groq, switched by LLM_PROVIDER
 anthropic>=0.40
+groq>=0.11
 python-dotenv>=1.0                    # optional, loads a local .env
 
-# Telegram frontend (pa.py) — not needed to run the web UI (web.py)
-python-telegram-bot[job-queue]>=22
+# API server (api/) — backs the mobile app
+fastapi>=0.115
+uvicorn[standard]>=0.32
+pydantic[email]>=2.9
+pyjwt>=2.9
+bcrypt>=4.2
 
 # Tests
 pytest>=8
+httpx>=0.27                           # required by fastapi.testclient.TestClient

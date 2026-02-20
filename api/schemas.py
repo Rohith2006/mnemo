@@ -1,0 +1,120 @@
+"""Pydantic request/response models for the mobile API."""
+
+from pydantic import BaseModel, EmailStr, Field
+
+
+# ── auth ──────────────────────────────────────────────────────────────────────
+class SignupRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=8)
+    name: str = ""
+
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+
+class UserOut(BaseModel):
+    user_id: str
+    email: str
+    name: str
+    tz: str
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserOut
+
+
+class UpdateMeRequest(BaseModel):
+    name: str | None = None
+    tz: str | None = None
+
+
+# ── capture / chat ────────────────────────────────────────────────────────────
+class ReminderOut(BaseModel):
+    id: str
+    task: str
+    fire_at: str  # ISO8601, for the client to schedule a local notification
+
+
+class CaptureRequest(BaseModel):
+    text: str = Field(min_length=1)
+
+
+class CaptureResponse(BaseModel):
+    facts: list[str]
+    log: list[dict]
+    tasks: list[dict]
+    done: list[dict]
+    habits: list[dict]
+    mood: dict | None
+    reminder: ReminderOut | None
+
+
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+
+
+class ChatRequest(BaseModel):
+    message: str = Field(min_length=1)
+    history: list[ChatMessage] = []
+
+
+class ChatResponse(BaseModel):
+    reply: str
+    reminder: ReminderOut | None
+
+
+# ── tasks / habits ────────────────────────────────────────────────────────────
+class TaskOut(BaseModel):
+    id: str
+    task: str
+    due: str | None
+    status: str
+
+
+class TaskCreate(BaseModel):
+    task: str = Field(min_length=1)
+    due: str | None = None
+
+
+class HabitOut(BaseModel):
+    name: str
+    streak: int
+    best_streak: int
+    last_done: str | None
+
+
+# ── dashboard ─────────────────────────────────────────────────────────────────
+class MoodOut(BaseModel):
+    avg: float
+    count: int
+
+
+class LogEntryOut(BaseModel):
+    category: str
+    key: str
+    value: str | None
+    unit: str
+
+
+class DashboardOut(BaseModel):
+    profile: list[str]
+    habits: list[HabitOut]
+    tasks: list[TaskOut]
+    trends: list[str]
+    log: list[LogEntryOut]
+    mood: MoodOut | None
+    reminders: list[ReminderOut]
+    alerts: list[str]
+
+
+# ── digests ───────────────────────────────────────────────────────────────────
+class DigestOut(BaseModel):
+    kind: str
+    text: str
+    date: str

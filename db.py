@@ -2,8 +2,8 @@
 SQLite connection + schema for mnemo's persistence layer.
 
 One file, WAL mode, one table per bucket (facts/log_entries/tasks/habits/
-journal/reminders) plus a `users` table for registry/prefs. store.py builds
-UserStore/UserRegistry/ReminderStore on top of this.
+journal/reminders/digests) plus a `users` table for auth/prefs. store.py
+builds UserStore/UserRegistry/ReminderStore on top of this.
 """
 
 import os
@@ -15,16 +15,13 @@ DEFAULT_DB_PATH = Path(__file__).parent / "data" / "mnemo.db"
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
     user_id TEXT PRIMARY KEY,
-    chat_id INTEGER,
+    email TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
     name TEXT NOT NULL DEFAULT '',
     tz TEXT NOT NULL DEFAULT 'Asia/Kolkata',
-    morning TEXT NOT NULL DEFAULT '08:00',
-    evening TEXT NOT NULL DEFAULT '21:00',
-    paused INTEGER NOT NULL DEFAULT 0,
-    last_nudge_at TEXT,
-    nudges_today INTEGER NOT NULL DEFAULT 0,
-    nudge_day TEXT
+    created_at TEXT NOT NULL
 );
+CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 
 CREATE TABLE IF NOT EXISTS facts (
     id TEXT PRIMARY KEY,
@@ -80,11 +77,22 @@ CREATE INDEX IF NOT EXISTS idx_journal_user_at ON journal(user_id, at);
 
 CREATE TABLE IF NOT EXISTS reminders (
     id TEXT PRIMARY KEY,
-    chat_id INTEGER NOT NULL,
+    user_id TEXT NOT NULL,
     task TEXT NOT NULL,
     fire_at TEXT NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_reminders_chat ON reminders(chat_id);
+CREATE INDEX IF NOT EXISTS idx_reminders_user ON reminders(user_id);
+
+CREATE TABLE IF NOT EXISTS digests (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    date TEXT NOT NULL,
+    text TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(user_id, kind, date)
+);
+CREATE INDEX IF NOT EXISTS idx_digests_user_date ON digests(user_id, date);
 """
 
 _connections: dict[str, sqlite3.Connection] = {}

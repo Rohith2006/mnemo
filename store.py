@@ -1,11 +1,12 @@
 """
-Persistence + tracking layer for the proactive PA.
+Persistence + tracking layer for mnemo.
 
 Backed by SQLite (see db.py) instead of a JSON blob. Three repositories:
 
-  • UserStore     — per-user structured memory (profile, log, tasks, habits, journal)
-  • UserRegistry  — who the bot knows + per-user prefs (chat_id, tz, digest times, pause)
-  • ReminderStore — pending NLP reminders
+  • UserStore     — per-user structured memory (profile, log, tasks, habits,
+                     journal, cached digests)
+  • UserRegistry  — accounts (email/password hash, tz)
+  • ReminderStore — pending NLP reminders, scoped per user
 
 The `log` bucket is deliberately schema-free on the Python side: ANY
 {category, key, value, unit} data point can be tracked, so the assistant is
@@ -67,10 +68,8 @@ def _habit_row_to_dict(r: sqlite3.Row) -> dict:
 
 def _user_row_to_dict(r: sqlite3.Row) -> dict:
     return {
-        "user_id": r["user_id"], "chat_id": r["chat_id"], "name": r["name"], "tz": r["tz"],
-        "morning": r["morning"], "evening": r["evening"], "paused": bool(r["paused"]),
-        "last_nudge_at": r["last_nudge_at"], "nudges_today": r["nudges_today"],
-        "nudge_day": r["nudge_day"],
+        "user_id": r["user_id"], "email": r["email"], "password_hash": r["password_hash"],
+        "name": r["name"], "tz": r["tz"], "created_at": r["created_at"],
     }
 
 
@@ -351,6 +350,22 @@ class UserStore:
         )
         return [{"id": r["id"], "at": r["at"], "mood": r["mood"], "note": r["note"]} for r in rows]
 
+    # ── digest cache (one generated digest per user/kind/day) ──
+    def get_cached_digest(self, kind: str, date_str: str) -> str | None:
+        row = self.conn.execute(
+            "SELECT text FROM digests WHERE user_id=? AND kind=? AND date=?",
+            (self.user_id, kind, date_str),
+        ).fetchone()
+        return row["text"] if row else None
+
+    def save_digest(self, kind: str, date_str: str, text: str) -> None:
+        self.conn.execute(
+            "INSERT INTO digests (id, user_id, kind, date, text, created_at) VALUES (?,?,?,?,?,?) "
+            "ON CONFLICT(user_id, kind, date) DO UPDATE SET text=excluded.text",
+            (_sid(), self.user_id, kind, date_str, text, _now_iso()),
+        )
+        self.conn.commit()
+
     # ── views for prompts / dashboards ──
     def summary(self) -> str:
         """Compact snapshot injected into the chat system prompt."""
@@ -404,9 +419,24 @@ class UserStore:
     # ── reset ──
     def forget_all(self) -> None:
         """Wipe every bucket for this user (the /forget command)."""
-        for table in ("facts", "log_entries", "tasks", "habits", "journal"):
+        for table in ("facts", "log_entries", "tasks", "habits", "journal", "digests"):
             self.conn.execute(f"DELETE FROM {table} WHERE user_id=?", (self.user_id,))
         self.conn.commit()
+
+    def complete_task_by_id(self, task_id: str) -> dict | None:
+        """Mark one open task done by id — for a direct tap-to-complete UI action."""
+        row = self.conn.execute(
+            "SELECT * FROM tasks WHERE user_id=? AND id=? AND status='open'",
+            (self.user_id, task_id),
+        ).fetchone()
+        if not row:
+            return None
+        now = _now_iso()
+        self.conn.execute("UPDATE tasks SET status='done', done_at=? WHERE id=?", (now, task_id))
+        self.conn.commit()
+        d = _task_row_to_dict(row)
+        d["status"], d["done_at"] = "done", now
+        return d
 
 
 _stores: dict[str, UserStore] = {}
@@ -419,24 +449,23 @@ def get_store(user_id: str) -> UserStore:
     return _stores[user_id]
 
 
-# ── Who the bot knows + per-user prefs ──────────────────────────────────────
+# ── Accounts ─────────────────────────────────────────────────────────────────
 class UserRegistry:
-    """
-    Tracks every user the bot has met so proactive jobs know where to send.
-    Per-user prefs: timezone, digest times, pause flag, last nudge timestamp.
-    """
+    """Accounts: email/password hash + prefs (tz). Password hashing/JWT issuance
+    live in the API layer — this just persists whatever hash it's given."""
 
     def __init__(self, conn: sqlite3.Connection | None = None):
         self.conn = conn or db.get_conn()
 
-    def register(self, user_id: str, chat_id: int, name: str = "") -> dict:
-        user_id = str(user_id)
+    def create(self, email: str, password_hash: str, name: str = "", tz: str = DEFAULT_TZ) -> dict:
+        """Create a new account. Raises ValueError if the email is already taken."""
+        if self.get_by_email(email):
+            raise ValueError(f"email already registered: {email}")
+        user_id = uuid.uuid4().hex
         self.conn.execute(
-            "INSERT INTO users (user_id, chat_id, name, tz, morning, evening, paused, "
-            "last_nudge_at, nudges_today, nudge_day) VALUES (?,?,?,?,?,?,0,NULL,0,NULL) "
-            "ON CONFLICT(user_id) DO UPDATE SET chat_id=excluded.chat_id, "
-            "name=CASE WHEN excluded.name != '' THEN excluded.name ELSE users.name END",
-            (user_id, chat_id, name, DEFAULT_TZ, "08:00", "21:00"),
+            "INSERT INTO users (user_id, email, password_hash, name, tz, created_at) "
+            "VALUES (?,?,?,?,?,?)",
+            (user_id, email.strip().lower(), password_hash, name, tz, _now_iso()),
         )
         self.conn.commit()
         return self.get(user_id)
@@ -444,6 +473,12 @@ class UserRegistry:
     def get(self, user_id: str) -> dict | None:
         row = self.conn.execute(
             "SELECT * FROM users WHERE user_id=?", (str(user_id),)
+        ).fetchone()
+        return _user_row_to_dict(row) if row else None
+
+    def get_by_email(self, email: str) -> dict | None:
+        row = self.conn.execute(
+            "SELECT * FROM users WHERE email=?", (email.strip().lower(),)
         ).fetchone()
         return _user_row_to_dict(row) if row else None
 
@@ -463,39 +498,6 @@ class UserRegistry:
         u = self.get(user_id)
         return ZoneInfo(u["tz"] if u else DEFAULT_TZ)
 
-    # nudge rate-limiting ("balanced": ≤2/day, ≥4h apart)
-    def can_nudge(self, user_id: str, max_per_day: int = 2, min_gap_h: int = 4) -> bool:
-        u = self.get(user_id)
-        if not u or u.get("paused"):
-            return False
-        tz = self.tz(user_id)
-        today = datetime.now(tz).date().isoformat()
-        if u.get("nudge_day") != today:
-            return True
-        if u.get("nudges_today", 0) >= max_per_day:
-            return False
-        last = u.get("last_nudge_at")
-        if last:
-            try:
-                if datetime.now(tz) - datetime.fromisoformat(last) < timedelta(hours=min_gap_h):
-                    return False
-            except ValueError:
-                pass
-        return True
-
-    def record_nudge(self, user_id: str):
-        u = self.get(user_id)
-        if not u:
-            return
-        tz = self.tz(user_id)
-        today = datetime.now(tz).date().isoformat()
-        nudges_today = 1 if u.get("nudge_day") != today else u.get("nudges_today", 0) + 1
-        self.conn.execute(
-            "UPDATE users SET nudge_day=?, nudges_today=?, last_nudge_at=? WHERE user_id=?",
-            (today, nudges_today, datetime.now(tz).isoformat(), str(user_id)),
-        )
-        self.conn.commit()
-
 
 registry = UserRegistry()
 
@@ -505,11 +507,11 @@ class ReminderStore:
     def __init__(self, conn: sqlite3.Connection | None = None):
         self.conn = conn or db.get_conn()
 
-    def add(self, chat_id: int, task: str, fire_at: datetime) -> str:
+    def add(self, user_id: str, task: str, fire_at: datetime) -> str:
         rid = str(uuid.uuid4())
         self.conn.execute(
-            "INSERT INTO reminders (id, chat_id, task, fire_at) VALUES (?,?,?,?)",
-            (rid, chat_id, task, fire_at.isoformat()),
+            "INSERT INTO reminders (id, user_id, task, fire_at) VALUES (?,?,?,?)",
+            (rid, str(user_id), task, fire_at.isoformat()),
         )
         self.conn.commit()
         return rid
@@ -524,7 +526,7 @@ class ReminderStore:
         for r in self.conn.execute("SELECT * FROM reminders").fetchall():
             fire_at = datetime.fromisoformat(r["fire_at"])
             if fire_at > now:
-                pending.append({"id": r["id"], "chat_id": r["chat_id"], "task": r["task"],
+                pending.append({"id": r["id"], "user_id": r["user_id"], "task": r["task"],
                                  "fire_at": r["fire_at"], "fire_at_dt": fire_at})
             else:
                 expired.append(r["id"])
@@ -532,15 +534,15 @@ class ReminderStore:
             self.remove(rid)
         return pending
 
-    def get_all_for_chat(self, chat_id: int) -> list[dict]:
+    def get_all_for_user(self, user_id: str) -> list[dict]:
         now = datetime.now().astimezone()
         result = []
         for r in self.conn.execute(
-            "SELECT * FROM reminders WHERE chat_id=?", (chat_id,)
+            "SELECT * FROM reminders WHERE user_id=?", (str(user_id),)
         ).fetchall():
             fire_at = datetime.fromisoformat(r["fire_at"])
             if fire_at > now:
-                result.append({"id": r["id"], "chat_id": r["chat_id"], "task": r["task"],
+                result.append({"id": r["id"], "user_id": r["user_id"], "task": r["task"],
                                 "fire_at": r["fire_at"], "fire_at_dt": fire_at})
         return sorted(result, key=lambda x: x["fire_at_dt"])
 

@@ -67,6 +67,15 @@ def test_add_tasks_dedupes_open_tasks_case_insensitively():
     assert len(s.open_tasks()) == 1
 
 
+def test_complete_task_by_id_marks_done_and_ignores_unknown_id():
+    s = store.get_store("u1")
+    added = s.add_tasks([{"task": "Submit report"}])
+    done = s.complete_task_by_id(added[0]["id"])
+    assert done["status"] == "done"
+    assert s.open_tasks() == []
+    assert s.complete_task_by_id("no-such-id") is None
+
+
 def test_complete_tasks_matches_by_substring_either_direction():
     s = store.get_store("u1")
     s.add_tasks([{"task": "Submit the quarterly report"}])
@@ -135,86 +144,77 @@ def test_recent_mood_average():
 
 
 # ── registry ─────────────────────────────────────────────────────────────────
-def test_register_preserves_prefs_and_updates_chat_id():
-    store.registry.register("u1", chat_id=1, name="Rohith")
-    store.registry.register("u1", chat_id=2, name="")  # empty name must not overwrite
-    u = store.registry.get("u1")
-    assert u["chat_id"] == 2
+def test_create_account_and_lookup_by_email():
+    u = store.registry.create("Rohith@Example.com", "hashed-pw", name="Rohith")
+    assert u["email"] == "rohith@example.com"  # normalized to lowercase
     assert u["name"] == "Rohith"
     assert u["tz"] == store.DEFAULT_TZ
+    assert store.registry.get(u["user_id"])["email"] == "rohith@example.com"
+    assert store.registry.get_by_email("rohith@example.com")["user_id"] == u["user_id"]
+
+
+def test_create_account_rejects_duplicate_email():
+    store.registry.create("dup@example.com", "hash1")
+    try:
+        store.registry.create("dup@example.com", "hash2")
+        assert False, "expected ValueError"
+    except ValueError:
+        pass
+
+
+def test_set_updates_fields():
+    u = store.registry.create("set@example.com", "hash")
+    store.registry.set(u["user_id"], name="New Name", tz="America/New_York")
+    updated = store.registry.get(u["user_id"])
+    assert updated["name"] == "New Name"
+    assert updated["tz"] == "America/New_York"
 
 
 def test_tz_defaults_for_unknown_user():
     assert str(store.registry.tz("nobody")) == store.DEFAULT_TZ
 
 
-def test_can_nudge_rate_limits_by_gap_and_daily_cap():
-    store.registry.register("u1", chat_id=1)
-    assert store.registry.can_nudge("u1", max_per_day=2, min_gap_h=4) is True
-
-    store.registry.record_nudge("u1")
-    assert store.registry.can_nudge("u1", max_per_day=2, min_gap_h=4) is False  # too soon
-
-    tz = store.registry.tz("u1")
-    old = (datetime.now(tz) - timedelta(hours=5)).isoformat()
-    store.registry.conn.execute("UPDATE users SET last_nudge_at=? WHERE user_id=?", (old, "u1"))
-    store.registry.conn.commit()
-    assert store.registry.can_nudge("u1", max_per_day=2, min_gap_h=4) is True  # gap passed
-
-    store.registry.record_nudge("u1")
-    assert store.registry.get("u1")["nudges_today"] == 2
-    assert store.registry.can_nudge("u1", max_per_day=2, min_gap_h=0) is False  # daily cap hit
-
-
-def test_can_nudge_false_when_paused():
-    store.registry.register("u1", chat_id=1)
-    store.registry.set("u1", paused=True)
-    assert store.registry.can_nudge("u1") is False
-
-
-def test_record_nudge_resets_counter_on_new_day():
-    store.registry.register("u1", chat_id=1)
-    store.registry.record_nudge("u1")
-    assert store.registry.get("u1")["nudges_today"] == 1
-
-    tz = store.registry.tz("u1")
-    yesterday = (datetime.now(tz).date() - timedelta(days=1)).isoformat()
-    store.registry.conn.execute("UPDATE users SET nudge_day=? WHERE user_id=?", (yesterday, "u1"))
-    store.registry.conn.commit()
-    store.registry.record_nudge("u1")
-    assert store.registry.get("u1")["nudges_today"] == 1  # reset, not accumulated to 2
-
-
 # ── reminders ────────────────────────────────────────────────────────────────
 def test_reminder_add_list_remove():
     fire_at = datetime.now().astimezone() + timedelta(hours=1)
-    rid = store.reminder_store.add(555, "call mom", fire_at)
-    pending = store.reminder_store.get_all_for_chat(555)
+    rid = store.reminder_store.add("u555", "call mom", fire_at)
+    pending = store.reminder_store.get_all_for_user("u555")
     assert len(pending) == 1 and pending[0]["task"] == "call mom"
     store.reminder_store.remove(rid)
-    assert store.reminder_store.get_all_for_chat(555) == []
+    assert store.reminder_store.get_all_for_user("u555") == []
 
 
 def test_get_pending_expires_past_reminders():
     past = datetime.now().astimezone() - timedelta(seconds=1)
     future = datetime.now().astimezone() + timedelta(hours=1)
-    store.reminder_store.add(1, "expired", past)
-    rid2 = store.reminder_store.add(1, "future", future)
+    store.reminder_store.add("u1", "expired", past)
+    rid2 = store.reminder_store.add("u1", "future", future)
 
     pending = store.reminder_store.get_pending()
     assert [p["task"] for p in pending] == ["future"]
 
-    remaining = store.reminder_store.get_all_for_chat(1)
+    remaining = store.reminder_store.get_all_for_user("u1")
     assert len(remaining) == 1 and remaining[0]["id"] == rid2
 
 
-def test_get_all_for_chat_sorted_by_fire_time():
+def test_get_all_for_user_sorted_by_fire_time():
     later = datetime.now().astimezone() + timedelta(hours=2)
     sooner = datetime.now().astimezone() + timedelta(hours=1)
-    store.reminder_store.add(2, "later", later)
-    store.reminder_store.add(2, "sooner", sooner)
-    tasks = [r["task"] for r in store.reminder_store.get_all_for_chat(2)]
+    store.reminder_store.add("u2", "later", later)
+    store.reminder_store.add("u2", "sooner", sooner)
+    tasks = [r["task"] for r in store.reminder_store.get_all_for_user("u2")]
     assert tasks == ["sooner", "later"]
+
+
+# ── digest cache ─────────────────────────────────────────────────────────────
+def test_digest_cache_roundtrip_and_overwrite():
+    s = store.get_store("u1")
+    assert s.get_cached_digest("morning", "2026-08-17") is None
+    s.save_digest("morning", "2026-08-17", "first version")
+    assert s.get_cached_digest("morning", "2026-08-17") == "first version"
+    s.save_digest("morning", "2026-08-17", "regenerated")
+    assert s.get_cached_digest("morning", "2026-08-17") == "regenerated"
+    assert s.get_cached_digest("evening", "2026-08-17") is None  # different kind, no bleed
 
 
 # ── forget ───────────────────────────────────────────────────────────────────
@@ -225,6 +225,7 @@ def test_forget_all_wipes_every_bucket():
     s.add_tasks([{"task": "do thing"}])
     s.log_habit("Running")
     s.add_journal(5)
+    s.save_digest("morning", "2026-08-17", "text")
 
     s.forget_all()
 
@@ -233,3 +234,4 @@ def test_forget_all_wipes_every_bucket():
     assert s.open_tasks() == []
     assert s.active_habits() == []
     assert s.recent_mood(999) == []
+    assert s.get_cached_digest("morning", "2026-08-17") is None

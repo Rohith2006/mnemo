@@ -69,6 +69,9 @@ class _FakeResponse:
 
 
 def test_call_llm_splits_system_from_conversation(monkeypatch):
+    # LLM_PROVIDER is pinned per-test (not left to whatever the developer's local
+    # .env happens to have) so this exercises the Anthropic branch deterministically.
+    monkeypatch.setattr(brain, "LLM_PROVIDER", "anthropic")
     captured = {}
 
     def fake_create(**kwargs):
@@ -88,6 +91,7 @@ def test_call_llm_splits_system_from_conversation(monkeypatch):
 
 
 def test_call_llm_defaults_to_empty_user_turn_when_no_conversation(monkeypatch):
+    monkeypatch.setattr(brain, "LLM_PROVIDER", "anthropic")
     captured = {}
 
     def fake_create(**kwargs):
@@ -98,6 +102,46 @@ def test_call_llm_defaults_to_empty_user_turn_when_no_conversation(monkeypatch):
 
     brain.call_llm([{"role": "system", "content": "sys only"}])
     assert captured["messages"] == [{"role": "user", "content": ""}]
+
+
+class _FakeGroqMessage:
+    def __init__(self, text):
+        self.content = text
+
+
+class _FakeGroqChoice:
+    def __init__(self, text):
+        self.message = _FakeGroqMessage(text)
+
+
+class _FakeGroqResponse:
+    def __init__(self, text):
+        self.choices = [_FakeGroqChoice(text)]
+
+
+def test_call_llm_groq_branch_sends_system_as_a_message(monkeypatch):
+    # Groq's (OpenAI-shaped) API has no separate top-level `system` param — it's
+    # just another message, unlike Anthropic's.
+    monkeypatch.setattr(brain, "LLM_PROVIDER", "groq")
+    captured = {}
+
+    def fake_create(**kwargs):
+        captured.update(kwargs)
+        return _FakeGroqResponse("hi from groq")
+
+    monkeypatch.setattr(brain.groq_client.chat.completions, "create", fake_create)
+
+    reply = brain.call_llm([
+        {"role": "system", "content": "You are helpful."},
+        {"role": "user", "content": "Hello"},
+    ], temperature=0.5)
+
+    assert reply == "hi from groq"
+    assert captured["messages"] == [
+        {"role": "system", "content": "You are helpful."},
+        {"role": "user", "content": "Hello"},
+    ]
+    assert captured["temperature"] == 0.5  # unlike Anthropic, Groq forwards it
 
 
 # ── apply_extraction (real store, no mocking needed) ─────────────────────────

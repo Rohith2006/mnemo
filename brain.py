@@ -1,7 +1,6 @@
 """
-Telegram-free core of the PA: config, LLM calls, extraction, reminder
-detection, digests, and reply generation. Shared by pa.py (Telegram) and
-web.py (local UI) — built incrementally across stages 5-7 of the rebuild.
+The shared core of mnemo: config, LLM calls, extraction, reminder detection,
+digests, and reply generation. No HTTP/frontend dependency — called from api/.
 """
 
 import os
@@ -11,6 +10,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import anthropic
+import groq
 
 try:  # optional local .env
     from dotenv import load_dotenv
@@ -18,28 +18,55 @@ try:  # optional local .env
 except ImportError:
     pass
 
-# Anthropic-native: a local proxy (opencode) fronting the user's Claude subscription.
-# The SDK also reads ANTHROPIC_API_KEY / ANTHROPIC_BASE_URL from the env automatically.
+# Two supported LLM providers, switched via LLM_PROVIDER (default "anthropic"):
+#   anthropic — the Messages API, either https://api.anthropic.com with a real key,
+#               or a local proxy (e.g. opencode) fronting a Claude subscription.
+#   groq      — Groq's OpenAI-compatible chat-completions API. Useful as a free/fast
+#               placeholder while an Anthropic key isn't set up yet.
+# Both clients are constructed unconditionally at import (cheap — no network call)
+# so either can be exercised/mocked in tests regardless of which is active.
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "anthropic").lower()
+
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "x")
 ANTHROPIC_BASE_URL = os.getenv("ANTHROPIC_BASE_URL", "http://127.0.0.1:3456")
-MODEL = os.getenv("PA_MODEL", "claude-opus-4-8")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "x")
 
 client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY, base_url=ANTHROPIC_BASE_URL)
+groq_client = groq.Groq(api_key=GROQ_API_KEY)
+
+if LLM_PROVIDER == "groq":
+    MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+else:
+    MODEL = os.getenv("PA_MODEL", "claude-sonnet-5")
 
 
 # ── LLM helpers ─────────────────────────────────────────────────────────────
 def call_llm(messages: list[dict], temperature: float = 0.3, max_tokens: int = 512) -> str:
     """
     Accepts OpenAI-style messages (with optional leading system messages) and calls
-    the Anthropic Messages API. `system` is a separate top-level param; only user/
-    assistant turns go in `messages`. temperature is accepted for call-site
-    compatibility but NOT forwarded — Opus 4.8 rejects sampling params.
+    whichever provider LLM_PROVIDER selects.
     """
     system = "\n\n".join(m["content"] for m in messages if m.get("role") == "system")
     convo = [{"role": m["role"], "content": m["content"]}
              for m in messages if m.get("role") in ("user", "assistant")]
     if not convo:
         convo = [{"role": "user", "content": ""}]
+
+    if LLM_PROVIDER == "groq":
+        groq_messages = ([{"role": "system", "content": system}] if system else []) + convo
+        # reasoning_effort=low: the default Groq model (openai/gpt-oss-120b) is a
+        # reasoning model that otherwise burns a chunk of max_tokens on a hidden
+        # `reasoning` field before ever emitting `content` — at this app's tight
+        # per-call budgets that risks truncating to empty output entirely.
+        resp = groq_client.chat.completions.create(
+            model=MODEL, messages=groq_messages, max_tokens=max_tokens, temperature=temperature,
+            reasoning_effort="low",
+        )
+        return (resp.choices[0].message.content or "").strip()
+
+    # Anthropic: `system` is a separate top-level param, not a message. temperature
+    # is accepted for call-site compatibility but NOT forwarded — Opus 4.8 (an
+    # earlier default model here) rejected sampling params; kept as-is for Anthropic.
     kwargs = {"model": MODEL, "max_tokens": max_tokens, "messages": convo}
     if system:
         kwargs["system"] = system
@@ -168,7 +195,9 @@ def build_reply(store, user_message, history, tz, pending_reminders=None, new_re
         "write files. Never output 'Tool use', file paths, code fences for memory, or any narration "
         "of actions — just talk to the user naturally.\n"
         "Use what you know to personalize, give concrete suggestions, and gently coach — but NEVER "
-        "fabricate facts. When the user shares info, acknowledge it warmly. Light markdown is fine.\n\n"
+        "fabricate facts. When the user shares info, acknowledge it warmly. Reply in PLAIN TEXT only — "
+        "no markdown (no **bold**, no tables, no headers), no HTML tags like <br>. The client renders "
+        "this as raw text, not formatted output. Use line breaks and emoji for structure instead.\n\n"
         f"=== WHAT YOU KNOW ===\n{store.summary()}\n=====================\n\n"
         f"=== {reminders_block}\n====================="
     )
@@ -208,8 +237,9 @@ def build_digest(store, tz: ZoneInfo, kind: str) -> str:
                "1-2 concrete, specific suggestions to make life more organized. No fluff.")
     prompt = (
         "You are a proactive personal assistant messaging the user unprompted. Use ONLY the data "
-        "below; never invent facts. If there's little to say, keep it to a line or two. Warm tone, "
-        "light markdown and emoji.\n\n"
+        "below; never invent facts. If there's little to say, keep it to a line or two. Warm tone. "
+        "Reply in PLAIN TEXT only — no markdown (no **bold**, no tables, no headers), no HTML tags "
+        "like <br>. The client renders this as raw text, not formatted output. Emoji are fine.\n\n"
         f"{ask}\n\nDATA:\n{json.dumps(facts, indent=2, ensure_ascii=False)}"
     )
     return call_llm([{"role": "user", "content": prompt}], temperature=0.6, max_tokens=500)
