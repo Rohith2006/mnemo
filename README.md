@@ -1,72 +1,83 @@
 # mnemo
 
 A hyper-personalized AI assistant with **persistent long-term memory**. Unlike a
-plain chatbot that forgets you the moment the tab closes, mnemo automatically
-extracts, deduplicates, and stores what it learns about you across conversations —
-your profile, habits, tasks, mood, and any data point worth tracking — and uses
-that memory to give genuinely personal replies.
+plain chatbot, mnemo automatically extracts, deduplicates, and stores what it
+learns about you — profile, habits, tasks, mood, and any data point worth
+tracking — and uses that memory to give personal replies and proactive insight.
+
+The primary UI is a **mobile app** (`mobile/`, Expo/React Native), deliberately
+**not chat-first**: its home screen is one-line quick-capture that returns a
+structured receipt of what was understood, not a conversational reply. A
+secondary Chat tab exists for open-ended conversation.
 
 ## What it does
 
-- **Automatic memory** — after every turn, a structured LLM call extracts personal
-  facts into typed buckets (profile / log / tasks / habits / mood). No "save" button.
-- **Smart updates** — new information *updates* existing memories instead of piling
-  up duplicates (e.g. a weight change overwrites the old value).
-- **Proactive behavior** — morning briefing and evening review per user, streak-at-risk
-  and overdue-task nudges, and natural-language reminders ("remind me at 3pm").
-- **Persistent** — SQLite-backed (WAL mode), so memory survives restarts and supports
-  real queries instead of rewriting a JSON blob on every change.
-- **Two frontends, one brain** — a Telegram bot and a local web UI share the same
-  core logic (`brain.py`) and storage (`store.py`); neither has its own copy of the
-  LLM/extraction logic.
+- **Quick capture, not chat** — log anything in one line ("ran 5k, remind me to
+  call mom at 6pm") and get back a structured receipt (facts/log/tasks/habits/
+  mood/reminder) — no LLM chat reply on the primary path.
+- **Automatic memory** — one structured LLM call per turn extracts into typed
+  buckets. No "save" button.
+- **Direct actions** — tap to complete a task or log a habit, no LLM involved.
+- **On-device reminders** — the phone schedules a real local notification the
+  moment a reminder is detected; no server push infrastructure required.
+- **Proactive insight** — morning/evening/on-demand digests, streak/deadline
+  alerts, computed live and shown in-app.
+- **Multi-user** — email/password auth, JWT bearer tokens, per-user data.
 
 ## Architecture
 
-| File           | Role |
-|----------------|------|
-| `db.py`        | SQLite schema + connection layer (WAL mode, one file per install) |
-| `store.py`     | Persistence layer — `UserStore` / `UserRegistry` / `ReminderStore` on top of `db.py` |
-| `brain.py`     | Core logic — LLM client, fact extraction, reminder detection, reply + digest generation |
-| `web.py`       | Local web UI — chat + live "what I'm tracking" dashboard |
-| `pa.py`        | Telegram frontend — proactive PA with briefings, nudges, reminders |
-| `tests/`       | pytest suite for `store.py` and `brain.py` — no network calls, LLM calls are mocked |
+| Path        | Role |
+|-------------|------|
+| `db.py`     | SQLite schema + connection layer (WAL mode) |
+| `store.py`  | Persistence — `UserStore` / `UserRegistry` / `ReminderStore` on top of `db.py` |
+| `brain.py`  | LLM client (Anthropic or Groq, via `LLM_PROVIDER`), extraction, reminder detection, reply + digest generation |
+| `api/`      | FastAPI backend — auth, capture/chat (the core product split), tasks/habits, reminders, digests |
+| `mobile/`   | Expo (React Native + TypeScript) app — the only frontend |
+| `tests/`    | pytest suite — no network calls, LLM calls are mocked |
 
-The LLM is called through the Anthropic Messages API via a local proxy
-(`ANTHROPIC_BASE_URL`, configurable) — see `.env.example`.
+See `CLAUDE.md` for the full architecture writeup (layering rules, the
+capture-vs-chat split, import-order gotchas, known limitations).
 
 ## Setup
 
 ```bash
-python -m venv venv
-venv\Scripts\activate        # Windows
-# source venv/bin/activate   # macOS/Linux
-
+# Backend
+python -m venv venv && source venv/bin/activate   # Windows: venv\Scripts\activate
 pip install -r requirements.txt
+cp .env.example .env    # fill in an LLM key (Anthropic or Groq) + MNEMO_JWT_SECRET
 
-cp .env.example .env    # then fill in your keys
+# Mobile app
+cd mobile && npm install
 ```
 
 ## Run
 
 ```bash
-# Local web UI (recommended) — then open http://127.0.0.1:8000
-python web.py
+# Backend (LAN-reachable — the mobile app connects to this over wifi)
+uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
 
-# Telegram bot (needs TELEGRAM_BOT_TOKEN in .env)
-python pa.py
+# Mobile app
+cd mobile && npx expo start        # scan the QR with Expo Go on your phone
+npx expo start --web               # or preview in a browser at localhost:8081
 ```
+
+In the app's login/signup screen, set Server URL to your machine's LAN IP
+(e.g. `http://192.168.1.6:8000`) if connecting from a phone, or
+`http://127.0.0.1:8000` if testing from the same machine's browser.
 
 ## Testing
 
 ```bash
-pytest
+pytest                              # backend, full suite
+cd mobile && npx tsc --noEmit       # mobile, typecheck (no test suite yet)
 ```
 
-The suite covers `store.py`'s persistence logic and `brain.py`'s extraction/reply/
-digest logic end-to-end against a real (tmp-path) SQLite database, with the LLM
-client mocked — no network access or API key required to run it.
+The backend suite covers `store.py`, `brain.py`, and `api/` end-to-end against a
+real (tmp-path) SQLite database, with the LLM client mocked — no network access
+or API key required to run it.
 
 ## Configuration
 
 All secrets/settings are read from environment variables (or a local `.env`) —
-copy `.env.example` to `.env` and fill in your own values. Nothing is hardcoded.
+copy `.env.example` to `.env` and fill in your own values. `LLM_PROVIDER`
+switches between `anthropic` (default) and `groq`.
