@@ -1,69 +1,156 @@
 import React, { useState } from "react";
-import { FlatList, KeyboardAvoidingView, Platform, Text, View } from "react-native";
+import { FlatList, KeyboardAvoidingView, Platform, TextInput, useWindowDimensions, View } from "react-native";
 import { useChat } from "../../src/api/hooks";
 import { ApiError } from "../../src/api/client";
-import { Banner, Field, PrimaryButton } from "../../src/components/Primitives";
-import { useTheme, spacing, radius } from "../../src/theme";
+import { SendButton } from "../../src/components/Button";
+import { MnemoMark } from "../../src/components/Logo";
+import { contentPadding, LargeTitle, Screen, TopBar, useScrollHeader } from "../../src/components/Screen";
+import { Callout } from "../../src/components/Surfaces";
+import { Text } from "../../src/components/Text";
 import { stripMarkdown } from "../../src/utils/text";
+import { radius, space, type as typeScale, useTheme } from "../../src/theme";
 import type { ChatMessage } from "../../src/api/types";
 
 type Bubble = ChatMessage & { id: string };
 
 export default function ChatScreen() {
   const t = useTheme();
+  const { width } = useWindowDimensions();
+  const pad = contentPadding(width);
+  const { scrolled, scrollProps } = useScrollHeader();
+
   const chat = useChat();
-  const [messages, setMessages] = useState<Bubble[]>([
-    { id: "welcome", role: "assistant", content: "This is for when you want to actually talk something through — for quick logging, use the Capture tab instead." },
-  ]);
+  const [messages, setMessages] = useState<Bubble[]>([]);
   const [input, setInput] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   const send = () => {
     const text = input.trim();
     if (!text) return;
-    const userMsg: Bubble = { id: `${Date.now()}-u`, role: "user", content: text };
-    const history = messages.filter((m) => m.id !== "welcome").map(({ role, content }) => ({ role, content }));
-    setMessages((prev) => [userMsg, ...prev]);
+    const history = messages.map(({ role, content }) => ({ role, content }));
+    setMessages((prev) => [{ id: `${Date.now()}-u`, role: "user", content: text }, ...prev]);
     setInput("");
     setError(null);
 
-    chat.mutate({ message: text, history }, {
-      onSuccess: (res) => {
-        setMessages((prev) => [{ id: `${Date.now()}-a`, role: "assistant", content: stripMarkdown(res.reply) }, ...prev]);
+    chat.mutate(
+      { message: text, history },
+      {
+        onSuccess: (res) =>
+          setMessages((prev) => [
+            { id: `${Date.now()}-a`, role: "assistant", content: stripMarkdown(res.reply) },
+            ...prev,
+          ]),
+        onError: (e) =>
+          setError(e instanceof ApiError ? e.message : "That did not go through. Try again."),
       },
-      onError: (e) => setError(e instanceof ApiError ? e.message : "Couldn't send that — try again."),
-    });
+    );
   };
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: t.bg }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-      <FlatList
-        data={messages}
-        keyExtractor={(m) => m.id}
-        inverted
-        contentContainerStyle={{ padding: spacing.lg }}
-        renderItem={({ item }) => (
-          <View style={{
-            alignSelf: item.role === "user" ? "flex-end" : "flex-start",
-            backgroundColor: item.role === "user" ? t.accentSoft : t.surface,
-            borderWidth: item.role === "assistant" ? 1 : 0, borderColor: t.border,
-            borderRadius: radius.lg, padding: spacing.md, marginBottom: spacing.sm, maxWidth: "82%",
-          }}>
-            <Text style={{ color: t.text, fontSize: 15, lineHeight: 20 }}>{item.content}</Text>
-          </View>
-        )}
-      />
-      <View style={{ padding: spacing.md, borderTopWidth: 1, borderTopColor: t.border, backgroundColor: t.surface }}>
-        {error && <Banner text={error} tone="danger" />}
-        <View style={{ flexDirection: "row", gap: spacing.sm, alignItems: "flex-end" }}>
-          <View style={{ flex: 1 }}>
-            <Field label="" value={input} onChangeText={setInput} placeholder="Ask me anything…" multiline />
-          </View>
-          <View style={{ width: 90 }}>
-            <PrimaryButton title="Send" onPress={send} loading={chat.isPending} disabled={!input.trim()} />
+    <Screen>
+      <TopBar title="Chat" showTitle={scrolled || messages.length > 0} />
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        keyboardVerticalOffset={90}
+      >
+        <FlatList
+          {...scrollProps}
+          data={messages}
+          keyExtractor={(m) => m.id}
+          inverted={messages.length > 0}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={{
+            paddingHorizontal: pad,
+            paddingTop: space.lg,
+            paddingBottom: space.lg,
+          }}
+          renderItem={({ item }) =>
+            item.role === "user" ? (
+              <View
+                style={{
+                  alignSelf: "flex-end",
+                  maxWidth: "84%",
+                  backgroundColor: t.sunken,
+                  borderRadius: radius.lg,
+                  paddingVertical: space.md,
+                  paddingHorizontal: space.lg,
+                  marginBottom: space.lg,
+                }}
+              >
+                <Text variant="body">{item.content}</Text>
+              </View>
+            ) : (
+              // No bubble. A hairline rule marks it as mnemo speaking, the way a
+              // quoted block reads in a document.
+              <View
+                style={{
+                  borderLeftWidth: 2,
+                  borderLeftColor: t.hairlineStrong,
+                  paddingLeft: space.lg,
+                  marginBottom: space.xxl,
+                }}
+              >
+                <Text variant="body">{item.content}</Text>
+              </View>
+            )
+          }
+          ListEmptyComponent={
+            // Top-aligned, so the large title sits where it does on every other screen.
+            <View style={{ paddingTop: space.md }}>
+              <LargeTitle title="Chat" subtitle="For thinking something through out loud." />
+              <View style={{ gap: space.sm }}>
+                <MnemoMark size={22} />
+                <Text variant="callout" tone="faint" style={{ maxWidth: 320 }}>
+                  Ask about anything you have logged. For quick entries, Capture is faster and gives you a
+                  record instead of a reply.
+                </Text>
+              </View>
+            </View>
+          }
+        />
+
+        <View
+          style={{
+            paddingHorizontal: pad,
+            paddingTop: space.md,
+            paddingBottom: space.md,
+            borderTopWidth: 1,
+            borderTopColor: t.hairline,
+            backgroundColor: t.canvas,
+          }}
+        >
+          {!!error && <Callout text={error} tone="critical" />}
+          <View
+            style={{
+              flexDirection: "row",
+              alignItems: "flex-end",
+              gap: space.sm,
+              backgroundColor: t.surface,
+              borderWidth: 1,
+              borderColor: t.hairline,
+              borderRadius: radius.xl,
+              paddingLeft: space.lg,
+              paddingRight: space.xs,
+              paddingVertical: space.xs,
+            }}
+          >
+            <TextInput
+              value={input}
+              onChangeText={setInput}
+              placeholder="Ask mnemo"
+              placeholderTextColor={t.inkFaint}
+              multiline
+              accessibilityLabel="Message"
+              style={[
+                typeScale.body,
+                { flex: 1, color: t.ink, maxHeight: 120, paddingVertical: space.sm },
+              ]}
+            />
+            <SendButton onPress={send} disabled={!input.trim()} loading={chat.isPending} />
           </View>
         </View>
-      </View>
-    </KeyboardAvoidingView>
+      </KeyboardAvoidingView>
+    </Screen>
   );
 }

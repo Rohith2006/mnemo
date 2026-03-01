@@ -1,48 +1,74 @@
 import React from "react";
-import { Alert, ScrollView, Text, View } from "react-native";
+import { Alert, ScrollView, useWindowDimensions, View } from "react-native";
 import { useAuth } from "../../src/auth/AuthContext";
 import { useForget } from "../../src/api/hooks";
-import { Card, GhostButton, SectionLabel } from "../../src/components/Primitives";
-import { useTheme, spacing } from "../../src/theme";
+import { Group, Row, SectionHeader } from "../../src/components/List";
+import { MnemoMark } from "../../src/components/Logo";
+import { contentPadding, LargeTitle, Screen, TopBar, useScrollHeader } from "../../src/components/Screen";
+import { Text } from "../../src/components/Text";
+import { space, useTheme } from "../../src/theme";
 
 export default function SettingsScreen() {
   const t = useTheme();
+  const { width } = useWindowDimensions();
+  const pad = contentPadding(width);
+  const { scrolled, scrollProps } = useScrollHeader();
+
   const { user, serverUrl, logout } = useAuth();
   const forget = useForget();
 
   const confirmForget = () => {
-    Alert.alert("Wipe everything?", "This deletes all facts, logs, tasks, habits, mood entries, and reminders. This can't be undone.",
-      [{ text: "Cancel", style: "cancel" }, { text: "Wipe it", style: "destructive", onPress: () => forget.mutate() }]);
+    Alert.alert(
+      "Erase everything?",
+      "This deletes every fact, log entry, task, habit, mood entry and reminder. It cannot be undone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Erase", style: "destructive", onPress: () => forget.mutate() },
+      ],
+    );
   };
 
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: t.bg }} contentContainerStyle={{ padding: spacing.lg }}>
-      <SectionLabel>Account</SectionLabel>
-      <Card style={{ marginBottom: spacing.lg }}>
-        <Row label="Name" value={user?.name || "—"} />
-        <Row label="Email" value={user?.email || "—"} />
-        <Row label="Timezone" value={user?.tz || "—"} />
-        <Row label="Server" value={serverUrl || "—"} last />
-      </Card>
+    <Screen>
+      <TopBar title="Settings" showTitle={scrolled} />
+      <ScrollView
+        {...scrollProps}
+        contentContainerStyle={{ paddingHorizontal: pad, paddingTop: space.xxl, paddingBottom: space.huge }}
+      >
+        <LargeTitle title="Settings" />
 
-      <SectionLabel>Session</SectionLabel>
-      <View style={{ marginBottom: spacing.lg }}>
-        <GhostButton title="Log out" onPress={logout} />
-      </View>
+        <SectionHeader title="Account" />
+        <Group style={{ marginBottom: space.xxxl }}>
+          <Row first icon="user" title="Name" value={user?.name || "Not set"} />
+          <Row icon="email" title="Email" value={user?.email || "Not set"} />
+          <Row icon="timezone" title="Timezone" value={user?.tz || "Not set"} />
+          <Row icon="server" title="Server" value={serverUrl || "Not set"} />
+        </Group>
 
-      <SectionLabel>Danger zone</SectionLabel>
-      <GhostButton title={forget.isPending ? "Wiping…" : "Forget everything"} onPress={confirmForget} danger />
-    </ScrollView>
-  );
-}
+        <SectionHeader title="Session" />
+        <Group style={{ marginBottom: space.xxxl }}>
+          <Row first icon="logout" title="Log out" onPress={logout} />
+        </Group>
 
-function Row({ label, value, last }: { label: string; value: string; last?: boolean }) {
-  const t = useTheme();
-  return (
-    <View style={{ flexDirection: "row", justifyContent: "space-between", paddingVertical: 8,
-      borderBottomWidth: last ? 0 : 1, borderBottomColor: t.border }}>
-      <Text style={{ color: t.textMuted, fontSize: 14 }}>{label}</Text>
-      <Text style={{ color: t.text, fontSize: 14 }}>{value}</Text>
-    </View>
+        <SectionHeader title="Data" />
+        <Group>
+          <Row
+            first
+            icon="wipe"
+            iconColor={t.critical}
+            titleTone="critical"
+            title={forget.isPending ? "Erasing" : "Erase everything"}
+            onPress={confirmForget}
+          />
+        </Group>
+
+        <View style={{ alignItems: "center", marginTop: space.huge, gap: space.sm }}>
+          <MnemoMark size={20} color={t.inkFaint} />
+          <Text variant="caption" tone="faint">
+            mnemo 1.0.0
+          </Text>
+        </View>
+      </ScrollView>
+    </Screen>
   );
 }

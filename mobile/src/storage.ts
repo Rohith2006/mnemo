@@ -1,5 +1,5 @@
 // expo-secure-store has no web implementation, so route through it only on
-// native and fall back to AsyncStorage on web (fine for a LAN dev tool — not
+// native and fall back to AsyncStorage on web (fine for a LAN dev tool, not
 // used for anything more sensitive than a bearer token + a server URL).
 import { Platform } from "react-native";
 import * as SecureStore from "expo-secure-store";

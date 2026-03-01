@@ -23,8 +23,8 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
 
   if (loading) {
     return (
-      <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: t.bg }}>
-        <ActivityIndicator color={t.accent} size="large" />
+      <View style={{ flex: 1, alignItems: "center", justifyContent: "center", backgroundColor: t.canvas }}>
+        <ActivityIndicator color={t.inkFaint} size="small" />
       </View>
     );
   }

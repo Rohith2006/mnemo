@@ -1,7 +1,7 @@
 // Reminders are scheduled as local, on-device notifications the moment the
-// server confirms one — no push infrastructure involved. This is what makes
+// server confirms one, with no push infrastructure involved. This is what makes
 // reminders work even though the backend is LAN-only: the phone alarms
-// itself. Digests/nudges are NOT handled here — those are pull/in-app only,
+// itself. Digests/nudges are NOT handled here: those are pull/in-app only,
 // computed live from /api/dashboard.
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
@@ -33,28 +33,47 @@ export async function requestPermissions(): Promise<boolean> {
   return status === "granted";
 }
 
-export async function scheduleReminder(reminder: ReminderOut): Promise<void> {
+/**
+ * Never throws. The server is the source of truth for a reminder, so failing to
+ * set the local alarm (no web support, permission denied, OS quota) must not
+ * make an otherwise successful capture look like it failed. `reconcile` picks
+ * up anything that did not get scheduled the next time the dashboard loads.
+ */
+export async function scheduleReminder(reminder: ReminderOut): Promise<boolean> {
+  if (Platform.OS === "web") return false; // no local notifications on web
+
   const fireAt = new Date(reminder.fire_at);
-  if (fireAt.getTime() <= Date.now()) return; // already past, don't schedule
+  if (fireAt.getTime() <= Date.now()) return false; // already past, don't schedule
 
-  const map = await loadMap();
-  if (map[reminder.id]) return; // already scheduled locally, don't duplicate
+  try {
+    const map = await loadMap();
+    if (map[reminder.id]) return true; // already scheduled locally, don't duplicate
 
-  const localId = await Notifications.scheduleNotificationAsync({
-    content: { title: "⏰ Reminder", body: reminder.task },
-    trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: fireAt },
-  });
-  map[reminder.id] = localId;
-  await saveMap(map);
+    const localId = await Notifications.scheduleNotificationAsync({
+      content: { title: "Reminder", body: reminder.task },
+      trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: fireAt },
+    });
+    map[reminder.id] = localId;
+    await saveMap(map);
+    return true;
+  } catch (e) {
+    console.warn("Could not schedule a local reminder notification", e);
+    return false;
+  }
 }
 
 export async function cancelReminder(reminderId: string): Promise<void> {
-  const map = await loadMap();
-  const localId = map[reminderId];
-  if (localId) {
-    await Notifications.cancelScheduledNotificationAsync(localId);
-    delete map[reminderId];
-    await saveMap(map);
+  if (Platform.OS === "web") return;
+  try {
+    const map = await loadMap();
+    const localId = map[reminderId];
+    if (localId) {
+      await Notifications.cancelScheduledNotificationAsync(localId);
+      delete map[reminderId];
+      await saveMap(map);
+    }
+  } catch (e) {
+    console.warn("Could not cancel a local reminder notification", e);
   }
 }
 
@@ -62,7 +81,11 @@ export async function cancelReminder(reminderId: string): Promise<void> {
  * isn't already scheduled locally (covers reinstalls / a second device). */
 export async function reconcile(pending: ReminderOut[]): Promise<void> {
   if (Platform.OS === "web") return; // no local notifications on web
-  const granted = await requestPermissions();
-  if (!granted) return;
+  try {
+    const granted = await requestPermissions();
+    if (!granted) return;
+  } catch {
+    return;
+  }
   for (const r of pending) await scheduleReminder(r);
 }

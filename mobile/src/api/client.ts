@@ -13,7 +13,7 @@ export async function getServerUrl(): Promise<string | null> {
 
 export async function setServerUrl(url: string, persist: boolean = true): Promise<void> {
   // persist=false: update the in-memory value so the imminent login/signup call
-  // actually hits this URL, without writing an unconfirmed address to storage —
+  // actually hits this URL, without writing an unconfirmed address to storage:
   // a failed attempt shouldn't leave a broken default behind for next time.
   const trimmed = url.trim().replace(/\/+$/, "");
   cachedServerUrl = trimmed;

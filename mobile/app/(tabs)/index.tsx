@@ -1,21 +1,41 @@
 import React, { useEffect, useState } from "react";
-import { FlatList, KeyboardAvoidingView, Platform, Pressable, RefreshControl, Text, View } from "react-native";
-import { useDashboard, useCapture, useDigest } from "../../src/api/hooks";
+import {
+  FlatList,
+  KeyboardAvoidingView,
+  Platform,
+  RefreshControl,
+  TextInput,
+  useWindowDimensions,
+  View,
+} from "react-native";
+import { useCapture, useDashboard, useDigest } from "../../src/api/hooks";
 import { ApiError } from "../../src/api/client";
-import { Banner, Card, Field, GhostButton, PrimaryButton, SectionLabel } from "../../src/components/Primitives";
+import { Button, ButtonRow, IconButton } from "../../src/components/Button";
+import { Icon } from "../../src/components/Icon";
+import { SectionHeader } from "../../src/components/List";
+import { Wordmark } from "../../src/components/Logo";
 import { Receipt } from "../../src/components/Receipt";
+import { contentPadding, LargeTitle, Screen, TopBar, useScrollHeader } from "../../src/components/Screen";
+import { Callout, Card } from "../../src/components/Surfaces";
+import { Text } from "../../src/components/Text";
 import { reconcile } from "../../src/notifications";
 import { stripMarkdown } from "../../src/utils/text";
-import { useTheme, spacing, radius } from "../../src/theme";
+import { iconSize, space, type as typeScale, useTheme } from "../../src/theme";
 import type { CaptureResponse } from "../../src/api/types";
 
-type ReceiptEntry = { id: string; text: string; result: CaptureResponse };
+type ReceiptEntry = { id: string; at: number; text: string; result: CaptureResponse };
+
+const PROMPT = "Ran 5k this morning, felt good. Remind me to call mom at 6.";
 
 export default function CaptureScreen() {
   const t = useTheme();
+  const { width } = useWindowDimensions();
+  const pad = contentPadding(width);
+  const { scrolled, scrollProps } = useScrollHeader();
+
   const { data: dash, refetch, isRefetching } = useDashboard();
   const capture = useCapture();
-  const morning = useDigest("morning");
+  const briefing = useDigest("morning");
   const insights = useDigest("ondemand");
 
   const [text, setText] = useState("");
@@ -33,70 +53,161 @@ export default function CaptureScreen() {
     setError(null);
     capture.mutate(value, {
       onSuccess: (result) => {
-        setReceipts((prev) => [{ id: `${Date.now()}`, text: value, result }, ...prev]);
+        setReceipts((prev) => [{ id: `${Date.now()}`, at: Date.now(), text: value, result }, ...prev]);
         setText("");
       },
-      onError: (e) => setError(e instanceof ApiError ? e.message : "Couldn't log that — try again."),
+      onError: (e) => setError(e instanceof ApiError ? e.message : "That did not go through. Try again."),
     });
   };
 
   const openDigest = (kind: "morning" | "ondemand") => {
-    const mutation = kind === "morning" ? morning : insights;
+    const mutation = kind === "morning" ? briefing : insights;
+    setError(null);
     mutation.mutate(false, {
-      onSuccess: (d) => setDigest({ title: kind === "morning" ? "☀️ Morning briefing" : "💡 Insights", text: stripMarkdown(d.text) }),
-      onError: (e) => setError(e instanceof ApiError ? e.message : "Couldn't generate that right now."),
+      onSuccess: (d) =>
+        setDigest({ title: kind === "morning" ? "Briefing" : "Insights", text: stripMarkdown(d.text) }),
+      onError: (e) =>
+        setError(e instanceof ApiError ? e.message : "Could not put that together right now."),
     });
   };
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: t.bg }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-      <FlatList
-        data={receipts}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={{ padding: spacing.lg, paddingBottom: spacing.xxl }}
-        refreshControl={<RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={t.accent} />}
-        renderItem={({ item }) => <Receipt text={item.text} result={item.result} />}
-        ListHeaderComponent={
-          <View>
-            {dash?.alerts.map((a, i) => <Banner key={i} text={a} />)}
-            {error && <Banner text={error} tone="danger" />}
+    <Screen>
+      <TopBar title="Capture" showTitle={scrolled} leading={<Wordmark size={20} />} />
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        keyboardVerticalOffset={90}
+      >
+        <FlatList
+          {...scrollProps}
+          data={receipts}
+          keyExtractor={(item) => item.id}
+          keyboardShouldPersistTaps="handled"
+          contentContainerStyle={{ paddingHorizontal: pad, paddingTop: space.xxl, paddingBottom: space.huge }}
+          refreshControl={
+            <RefreshControl refreshing={isRefetching} onRefresh={refetch} tintColor={t.inkFaint} />
+          }
+          renderItem={({ item }) => <Receipt text={item.text} at={item.at} result={item.result} />}
+          ListHeaderComponent={
+            <View>
+              <LargeTitle title="Capture" subtitle={today()} />
 
-            <Card style={{ marginBottom: spacing.md }}>
-              <SectionLabel>Tell me about your day</SectionLabel>
-              <Field label="" value={text} onChangeText={setText} placeholder="ran 5k, remind me to call mom at 6pm…"
-                     multiline numberOfLines={3} style={{ minHeight: 72, textAlignVertical: "top" }} />
-              <PrimaryButton title={capture.isPending ? "Logging…" : "Log it"} onPress={submit}
-                              disabled={!text.trim()} loading={capture.isPending} />
-            </Card>
+              {dash?.alerts.map((a, i) => (
+                <Callout key={i} text={a} tone="caution" />
+              ))}
+              {!!error && <Callout text={error} tone="critical" icon="alert" />}
 
-            <View style={{ flexDirection: "row", marginBottom: spacing.lg, gap: spacing.sm }}>
-              <View style={{ flex: 1 }}>
-                <GhostButton title="☀️ Briefing" onPress={() => openDigest("morning")} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <GhostButton title="💡 Insights" onPress={() => openDigest("ondemand")} />
-              </View>
-            </View>
-
-            {digest && (
-              <Card style={{ marginBottom: spacing.lg, borderColor: t.accent }}>
-                <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: spacing.sm }}>
-                  <Text style={{ color: t.accent, fontWeight: "700" }}>{digest.title}</Text>
-                  <Pressable onPress={() => setDigest(null)}><Text style={{ color: t.textMuted }}>✕</Text></Pressable>
+              <Card style={{ marginTop: dash?.alerts.length || error ? space.md : 0 }}>
+                <TextInput
+                  value={text}
+                  onChangeText={setText}
+                  placeholder={PROMPT}
+                  placeholderTextColor={t.inkFaint}
+                  multiline
+                  accessibilityLabel="What happened"
+                  style={[
+                    typeScale.body,
+                    { color: t.ink, padding: space.lg, minHeight: 104, textAlignVertical: "top" },
+                  ]}
+                />
+                {/* The placeholder already demonstrates what this understands,
+                    so the row underneath carries the action and nothing else. */}
+                <View
+                  style={{
+                    flexDirection: "row",
+                    justifyContent: "flex-end",
+                    borderTopWidth: 1,
+                    borderTopColor: t.hairline,
+                    padding: space.md,
+                  }}
+                >
+                  <Button
+                    title="Log it"
+                    size="sm"
+                    onPress={submit}
+                    disabled={!text.trim()}
+                    loading={capture.isPending}
+                  />
                 </View>
-                <Text style={{ color: t.text, fontSize: 14, lineHeight: 20 }}>{digest.text}</Text>
               </Card>
-            )}
 
-            {receipts.length > 0 && <SectionLabel>This session</SectionLabel>}
-          </View>
-        }
-        ListEmptyComponent={
-          <Text style={{ color: t.textMuted, fontStyle: "italic" }}>
-            Nothing logged yet this session — try the box above.
-          </Text>
-        }
-      />
-    </KeyboardAvoidingView>
+              <View style={{ marginTop: space.md }}>
+                <ButtonRow>
+                  <Button
+                    title="Briefing"
+                    icon="briefing"
+                    variant="secondary"
+                    size="sm"
+                    full
+                    loading={briefing.isPending}
+                    onPress={() => openDigest("morning")}
+                  />
+                  <Button
+                    title="Insights"
+                    icon="insight"
+                    variant="secondary"
+                    size="sm"
+                    full
+                    loading={insights.isPending}
+                    onPress={() => openDigest("ondemand")}
+                  />
+                </ButtonRow>
+              </View>
+
+              {digest && (
+                <Card style={{ marginTop: space.md, padding: space.lg }}>
+                  <View
+                    style={{
+                      flexDirection: "row",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      marginBottom: space.sm,
+                    }}
+                  >
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: space.sm }}>
+                      <Icon
+                        name={digest.title === "Briefing" ? "briefing" : "insight"}
+                        size={iconSize.sm}
+                        color={t.inkMuted}
+                      />
+                      <Text variant="overline" tone="muted" style={{ textTransform: "uppercase" }}>
+                        {digest.title}
+                      </Text>
+                    </View>
+                    <IconButton name="close" label="Close briefing" onPress={() => setDigest(null)} />
+                  </View>
+                  <Text variant="callout">{digest.text}</Text>
+                </Card>
+              )}
+
+              {receipts.length > 0 && (
+                <SectionHeader
+                  title="This session"
+                  style={{ marginTop: space.xxxl }}
+                  trailing={
+                    <Text variant="mono" tone="faint">
+                      {receipts.length}
+                    </Text>
+                  }
+                />
+              )}
+            </View>
+          }
+          ListEmptyComponent={
+            <View style={{ marginTop: space.xxxl, alignItems: "center", gap: space.sm }}>
+              <Icon name="capture" size={iconSize.lg} color={t.inkFaint} />
+              <Text variant="callout" tone="faint" style={{ textAlign: "center" }}>
+                Anything you write here gets sorted and kept.
+              </Text>
+            </View>
+          }
+        />
+      </KeyboardAvoidingView>
+    </Screen>
   );
+}
+
+function today() {
+  return new Date().toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" });
 }

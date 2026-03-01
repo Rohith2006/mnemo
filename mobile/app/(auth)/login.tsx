@@ -1,10 +1,14 @@
 import React, { useState } from "react";
-import { KeyboardAvoidingView, Platform, ScrollView, Text, View } from "react-native";
+import { KeyboardAvoidingView, Platform, ScrollView, View } from "react-native";
 import { Link } from "expo-router";
 import { useAuth } from "../../src/auth/AuthContext";
 import { ApiError } from "../../src/api/client";
-import { Field, PrimaryButton, Banner } from "../../src/components/Primitives";
-import { useTheme, spacing } from "../../src/theme";
+import { Button } from "../../src/components/Button";
+import { MnemoMark } from "../../src/components/Logo";
+import { Screen } from "../../src/components/Screen";
+import { Callout, Field } from "../../src/components/Surfaces";
+import { Text } from "../../src/components/Text";
+import { space, useTheme } from "../../src/theme";
 
 export default function Login() {
   const { serverUrl, configureServer, login } = useAuth();
@@ -21,7 +25,7 @@ export default function Login() {
     try {
       await configureServer(url, false); // try it first, don't remember a broken address
       await login(email.trim(), password);
-      await configureServer(url, true); // worked — now remember it
+      await configureServer(url, true); // worked, now remember it
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Something went wrong.");
     } finally {
@@ -30,28 +34,89 @@ export default function Login() {
   };
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: t.bg }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
-      <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: "center", padding: spacing.xl }}>
-        <Text style={{ fontSize: 28, fontWeight: "800", color: t.text, marginBottom: spacing.xs }}>mnemo</Text>
-        <Text style={{ color: t.textMuted, marginBottom: spacing.xl }}>Welcome back.</Text>
+    <Screen>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+        <ScrollView
+          contentContainerStyle={{
+            flexGrow: 1,
+            justifyContent: "center",
+            padding: space.xxl,
+            maxWidth: 460,
+            width: "100%",
+            alignSelf: "center",
+          }}
+          keyboardShouldPersistTaps="handled"
+        >
+          <View style={{ marginBottom: space.xxxl }}>
+            <MnemoMark size={30} />
+            <Text variant="display" style={{ marginTop: space.lg }}>
+              Welcome back
+            </Text>
+            <Text variant="callout" tone="muted" style={{ marginTop: space.xs }}>
+              Pick up where your memory left off.
+            </Text>
+          </View>
 
-        {error && <Banner text={error} tone="danger" />}
+          {!!error && <Callout text={error} tone="critical" />}
 
-        <Field label="Server URL (on your laptop's LAN)" value={url} onChangeText={setUrl}
-               autoCapitalize="none" autoCorrect={false} keyboardType="url" placeholder="http://192.168.1.42:8000" />
-        <Field label="Email" value={email} onChangeText={setEmail}
-               autoCapitalize="none" autoCorrect={false} keyboardType="email-address" placeholder="you@example.com" />
-        <Field label="Password" value={password} onChangeText={setPassword} secureTextEntry placeholder="••••••••" />
+          <Field
+            label="Server"
+            hint="Your mnemo backend on the local network."
+            value={url}
+            onChangeText={setUrl}
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="url"
+            placeholder="http://192.168.1.42:8000"
+          />
+          <Field
+            label="Email"
+            value={email}
+            onChangeText={setEmail}
+            autoCapitalize="none"
+            autoCorrect={false}
+            keyboardType="email-address"
+            textContentType="emailAddress"
+            placeholder="you@example.com"
+          />
+          <Field
+            label="Password"
+            value={password}
+            onChangeText={setPassword}
+            secureTextEntry
+            textContentType="password"
+            placeholder="Your password"
+          />
 
-        <View style={{ height: spacing.sm }} />
-        <PrimaryButton title="Log in" onPress={onSubmit} loading={loading}
-                        disabled={!url || !email || !password} />
+          <Button
+            title="Log in"
+            full
+            onPress={onSubmit}
+            loading={loading}
+            disabled={!url || !email || !password}
+            style={{ marginTop: space.sm }}
+          />
 
-        <View style={{ flexDirection: "row", justifyContent: "center", marginTop: spacing.lg }}>
-          <Text style={{ color: t.textMuted }}>New here? </Text>
-          <Link href="/(auth)/signup"><Text style={{ color: t.accent, fontWeight: "700" }}>Create an account</Text></Link>
-        </View>
-      </ScrollView>
-    </KeyboardAvoidingView>
+          <View
+            style={{
+              flexDirection: "row",
+              justifyContent: "center",
+              alignItems: "center",
+              gap: space.xs,
+              marginTop: space.xxl,
+            }}
+          >
+            <Text variant="footnote" tone="muted">
+              New here?
+            </Text>
+            <Link href="/(auth)/signup" accessibilityRole="link">
+              <Text variant="footnote" color={t.ink} style={{ textDecorationLine: "underline" }}>
+                Create an account
+              </Text>
+            </Link>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </Screen>
   );
 }

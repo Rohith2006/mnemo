@@ -21,6 +21,8 @@ export type ReminderOut = {
 
 export type CaptureResponse = {
   facts: string[];
+  facts_updated: string[];
+  facts_removed: string[];
   log: { category: string; key: string; value: unknown; unit: string; note: string; at: string }[];
   tasks: { id: string; task: string; due: string | null; status: string }[];
   done: { id: string; task: string; status: string }[];
