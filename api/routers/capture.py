@@ -31,6 +31,8 @@ def capture(body: CaptureRequest, user: dict = Depends(get_current_user)):
         reminder_out = ReminderOut(id=rid, task=reminder_hit["task"], fire_at=fire_at.isoformat())
 
     return CaptureResponse(
-        facts=changed["facts"], log=changed["log"], tasks=changed["tasks"], done=changed["done"],
-        habits=changed["habits"], mood=changed["mood"], reminder=reminder_out,
+        facts=changed["facts"], facts_updated=changed["facts_updated"],
+        facts_removed=changed["facts_removed"], log=changed["log"], tasks=changed["tasks"],
+        done=changed["done"], habits=changed["habits"], mood=changed["mood"],
+        reminder=reminder_out,
     )

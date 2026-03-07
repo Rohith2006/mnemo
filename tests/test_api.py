@@ -105,6 +105,22 @@ def test_capture_returns_receipt_not_a_chat_reply(auth_headers, fake_llm):
     assert "reply" not in body  # capture is a receipt, not a conversation
 
 
+def test_capture_receipt_reports_updated_and_removed_facts(auth_headers, fake_llm):
+    fake_llm.extraction = {"facts": ["Lives in Bengaluru", "Vegetarian"]}
+    client.post("/api/capture", json={"text": "i live in bengaluru, im vegetarian"}, headers=auth_headers)
+
+    fake_llm.extraction = {
+        "facts_update": [{"old": "bengaluru", "new": "Lives in Dubai"}],
+        "facts_remove": ["vegetarian"],
+    }
+    r = client.post("/api/capture", json={"text": "moved to dubai, eating meat now"}, headers=auth_headers)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["facts_updated"] == ["Lives in Dubai"]
+    assert body["facts_removed"] == ["Vegetarian"]
+    assert body["facts"] == []
+
+
 def test_capture_detects_and_schedules_reminder(auth_headers, fake_llm):
     fake_llm.reminder = {"is_reminder": True, "task": "call mom", "seconds_from_now": 1800}
     r = client.post("/api/capture", json={"text": "remind me to call mom in 30 min"}, headers=auth_headers)

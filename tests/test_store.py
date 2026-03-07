@@ -20,6 +20,35 @@ def test_add_facts_skips_blank_and_too_short():
     assert s.facts() == []
 
 
+def test_update_fact_replaces_the_superseded_one():
+    s = store.get_store("u1")
+    s.add_facts(["Lives in Bengaluru", "CS student"])
+    assert s.update_fact("bengaluru", "Lives in Dubai") == "Lives in Dubai"
+    assert s.facts() == ["CS student", "Lives in Dubai"]
+
+
+def test_update_fact_returns_none_when_nothing_matches():
+    s = store.get_store("u1")
+    s.add_facts(["CS student"])
+    assert s.update_fact("lives in paris", "Lives in Dubai") is None
+    assert s.facts() == ["CS student"]
+
+
+def test_remove_facts_hides_them_from_facts():
+    s = store.get_store("u1")
+    s.add_facts(["Lives in Bengaluru", "CS student"])
+    assert s.remove_facts(["bengaluru"]) == ["Lives in Bengaluru"]
+    assert s.facts() == ["CS student"]
+
+
+def test_removed_fact_can_be_added_again():
+    s = store.get_store("u1")
+    s.add_facts(["Lives in Bengaluru"])
+    s.remove_facts(["bengaluru"])
+    assert s.add_facts(["Lives in Bengaluru"]) == ["Lives in Bengaluru"]
+    assert s.facts() == ["Lives in Bengaluru"]
+
+
 # ── log / trends ─────────────────────────────────────────────────────────────
 def test_recent_log_respects_cutoff():
     s = store.get_store("u1")

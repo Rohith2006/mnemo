@@ -169,6 +169,55 @@ def test_apply_extraction_persists_all_buckets():
     assert len(s.active_habits()) == 1
 
 
+def test_apply_extraction_updates_a_superseded_fact():
+    s = store.get_store("u1")
+    s.add_facts(["Lives in Bengaluru"])
+    changed = brain.apply_extraction(
+        s, {"facts_update": [{"old": "bengaluru", "new": "Lives in Dubai"}]}
+    )
+    assert changed["facts_updated"] == ["Lives in Dubai"]
+    assert s.facts() == ["Lives in Dubai"]
+
+
+def test_apply_extraction_removes_contradicted_facts():
+    s = store.get_store("u1")
+    s.add_facts(["Vegetarian", "CS student"])
+    changed = brain.apply_extraction(s, {"facts_remove": ["vegetarian"]})
+    assert changed["facts_removed"] == ["Vegetarian"]
+    assert s.facts() == ["CS student"]
+
+
+def test_apply_extraction_ignores_malformed_fact_reconciliation():
+    s = store.get_store("u1")
+    s.add_facts(["Lives in Bengaluru"])
+    changed = brain.apply_extraction(
+        s,
+        {
+            "facts_update": ["not-a-dict", {"old": "bengaluru"}, {"new": "no old key"}],
+            "facts_remove": [123, None],
+        },
+    )
+    assert changed["facts_updated"] == []
+    assert changed["facts_removed"] == []
+    assert s.facts() == ["Lives in Bengaluru"]
+
+
+def test_extract_prompt_includes_existing_facts(monkeypatch):
+    s = store.get_store("u1")
+    s.add_facts(["Lives in Bengaluru"])
+
+    captured = {}
+
+    def fake_call_llm(messages, **kwargs):
+        captured["prompt"] = messages[0]["content"]
+        return "{}"
+
+    monkeypatch.setattr(brain, "call_llm", fake_call_llm)
+    brain.extract("i moved to dubai", "Nice!", s, TZ)
+
+    assert "Lives in Bengaluru" in captured["prompt"]
+
+
 def test_apply_extraction_completes_tasks():
     s = store.get_store("u1")
     s.add_tasks([{"task": "Submit the quarterly report"}])
@@ -179,7 +228,8 @@ def test_apply_extraction_completes_tasks():
 
 def test_apply_extraction_handles_empty_data():
     s = store.get_store("u1")
-    empty = {"facts": [], "log": [], "tasks": [], "done": [], "habits": [], "mood": None}
+    empty = {"facts": [], "facts_updated": [], "facts_removed": [],
+             "log": [], "tasks": [], "done": [], "habits": [], "mood": None}
     assert brain.apply_extraction(s, {}) == empty
     assert brain.apply_extraction(s, None) == empty
 

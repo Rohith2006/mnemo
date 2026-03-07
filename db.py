@@ -27,7 +27,9 @@ CREATE TABLE IF NOT EXISTS facts (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
     fact TEXT NOT NULL,
-    at TEXT NOT NULL
+    at TEXT NOT NULL,
+    updated_at TEXT,
+    active INTEGER NOT NULL DEFAULT 1
 );
 CREATE INDEX IF NOT EXISTS idx_facts_user ON facts(user_id);
 
@@ -98,6 +100,25 @@ CREATE INDEX IF NOT EXISTS idx_digests_user_date ON digests(user_id, date);
 _connections: dict[str, sqlite3.Connection] = {}
 
 
+# Additive columns introduced after the first DBs were created. There is no
+# migration framework here (pre-production), but CREATE TABLE IF NOT EXISTS
+# silently skips an existing table, so these have to be ALTERed in by hand.
+ADDED_COLUMNS = {
+    "facts": [
+        ("updated_at", "TEXT"),
+        ("active", "INTEGER NOT NULL DEFAULT 1"),
+    ],
+}
+
+
+def _add_missing_columns(conn: sqlite3.Connection) -> None:
+    for table, columns in ADDED_COLUMNS.items():
+        have = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+        for name, decl in columns:
+            if name not in have:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+
+
 def get_db_path() -> Path:
     override = os.getenv("MNEMO_DB_PATH")
     return Path(override) if override else DEFAULT_DB_PATH
@@ -115,6 +136,7 @@ def get_conn(path: Path | None = None) -> sqlite3.Connection:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
         conn.executescript(SCHEMA)
+        _add_missing_columns(conn)
         conn.commit()
         _connections[key] = conn
     return conn

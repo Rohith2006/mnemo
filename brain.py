@@ -102,6 +102,7 @@ def extract(user_msg: str, assistant_msg: str, store, tz: ZoneInfo) -> dict:
     now = datetime.now(tz)
     open_tasks = [t["task"] for t in store.open_tasks()]
     habit_names = [h["name"] for h in store.active_habits()]
+    known_facts = store.facts()
 
     prompt = (
         f"Current time: {now.strftime('%A %Y-%m-%d %H:%M')} ({tz}).\n\n"
@@ -116,12 +117,20 @@ def extract(user_msg: str, assistant_msg: str, store, tz: ZoneInfo) -> dict:
         '  "tasks_new": [{"task":"...","due":"ISO8601 or null"}],\n'
         '  "tasks_done": ["substring of an existing open task the user just finished"],\n'
         '  "habits_done": ["name of a recurring habit the user did today"],\n'
-        '  "mood": {"score": <1-10>, "note": "..."} or null\n'
+        '  "mood": {"score": <1-10>, "note": "..."} or null,\n'
+        '  "facts_update": [{"old":"substring of an existing fact","new":"its corrected replacement"}],\n'
+        '  "facts_remove": ["substring of an existing fact that is no longer true"]\n'
         "}\n"
         "Rules: omit empty arrays' contents rather than inventing. Resolve relative dates "
         "('tomorrow 6pm') to absolute ISO8601 in the user's timezone. Use null for unknown due. "
         "habits = things done repeatedly (running, journaling, gym, meditation). "
-        "Skip greetings/small talk.\n\n"
+        "Skip greetings/small talk.\n"
+        "Reconcile against EXISTING FACTS instead of piling up duplicates and contradictions: "
+        "if this turn supersedes a known fact (moved city, changed job, new diet), put it in "
+        "\"facts_update\"; if a known fact is simply no longer true with nothing replacing it, "
+        "put it in \"facts_remove\"; only put genuinely NEW information in \"facts\". Never "
+        "restate an existing fact. When unsure, leave the existing fact alone.\n\n"
+        f"EXISTING FACTS: {known_facts}\n"
         f"EXISTING OPEN TASKS: {open_tasks}\n"
         f"KNOWN HABITS: {habit_names}\n\n"
         f"User: {user_msg}\nAssistant: {assistant_msg}"
@@ -131,9 +140,26 @@ def extract(user_msg: str, assistant_msg: str, store, tz: ZoneInfo) -> dict:
 
 
 def apply_extraction(store, data: dict) -> dict:
-    changed = {"facts": [], "log": [], "tasks": [], "done": [], "habits": [], "mood": None}
+    changed = {"facts": [], "facts_updated": [], "facts_removed": [],
+               "log": [], "tasks": [], "done": [], "habits": [], "mood": None}
     if not data:
         return changed
+    # Reconcile before adding: an update inserts the corrected fact, so a redundant
+    # entry in "facts" for the same thing is then caught by add_facts' dedup.
+    if isinstance(data.get("facts_update"), list):
+        for item in data["facts_update"]:
+            if not isinstance(item, dict):
+                continue
+            old_match, new_fact = item.get("old"), item.get("new")
+            if not isinstance(old_match, str) or not isinstance(new_fact, str):
+                continue
+            updated = store.update_fact(old_match, new_fact)
+            if updated:
+                changed["facts_updated"].append(updated)
+    if isinstance(data.get("facts_remove"), list):
+        changed["facts_removed"] = store.remove_facts(
+            [m for m in data["facts_remove"] if isinstance(m, str)]
+        )
     if isinstance(data.get("facts"), list):
         changed["facts"] = store.add_facts([f for f in data["facts"] if isinstance(f, str)])
     if isinstance(data.get("log"), list):

@@ -55,9 +55,14 @@ functions and a `store.py` `UserStore`/`UserRegistry`/`ReminderStore` instance.
   the path and call `reset_connections()` between runs. Tables: `users` (accounts: email/password
   hash/tz), `facts`, `log_entries`, `tasks`, `habits`, `journal`, `reminders`, `digests` (per-user
   per-kind per-day cache). No migration framework — this is pre-production, schema changes are made
-  directly.
+  directly. The one exception: `ADDED_COLUMNS` in `db.py` ALTERs in columns added after the first
+  DBs were created, since `CREATE TABLE IF NOT EXISTS` silently skips an existing table. Add to it
+  when adding a column to an existing table.
 - **`store.py`** — three repositories on top of `db.py`:
-  - `UserStore` — per-user memory: `facts` (deduped, case-insensitive), `log_entries` (deliberately
+  - `UserStore` — per-user memory: `facts` (deduped case-insensitively, and *reconciled*:
+    `update_fact`/`remove_facts` soft-delete a superseded row via `active=0` rather than deleting it,
+    so a profile keeps its history and `facts()` only ever returns what's currently true),
+    `log_entries` (deliberately
     schema-free: `{category, key, value, unit, note}` — any metric type, no schema change needed to
     track a new kind of thing), `tasks` (dedup on open-task text; `complete_tasks` fuzzy-matches by
     substring for LLM-driven completion, `complete_task_by_id` is exact-id for a direct UI tap),
@@ -81,8 +86,10 @@ functions and a `store.py` `UserStore`/`UserRegistry`/`ReminderStore` instance.
     `system` string + user/assistant turns. `temperature` is accepted for call-site compatibility
     but **not forwarded** — the configured model (`PA_MODEL`, default `claude-opus-4-8`) rejects
     sampling params.
-  - `extract` — one structured LLM call per turn → JSON across all buckets (`facts`, `log`,
-    `tasks_new`, `tasks_done`, `habits_done`, `mood`). Single-call-per-turn is intentional.
+  - `extract` — one structured LLM call per turn → JSON across all buckets (`facts`, `facts_update`,
+    `facts_remove`, `log`, `tasks_new`, `tasks_done`, `habits_done`, `mood`). Single-call-per-turn is
+    intentional: fact reconciliation is folded into this same call (the prompt is given the existing
+    facts, as it already is for open tasks and habits) rather than costing a second round-trip.
   - `apply_extraction` — writes `extract`'s output into a `UserStore`, validating types defensively
     (LLM JSON is untrusted input).
   - `detect_reminder` — separate LLM call, natural language → `{task, seconds}`.

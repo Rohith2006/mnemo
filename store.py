@@ -85,7 +85,9 @@ class UserStore:
     def add_facts(self, facts: list[str]) -> list[str]:
         existing = {
             r["fact"].lower() for r in
-            self.conn.execute("SELECT fact FROM facts WHERE user_id=?", (self.user_id,))
+            self.conn.execute(
+                "SELECT fact FROM facts WHERE user_id=? AND active=1", (self.user_id,)
+            )
         }
         added = []
         now = _now_iso()
@@ -105,9 +107,66 @@ class UserStore:
 
     def facts(self) -> list[str]:
         rows = self.conn.execute(
-            "SELECT fact FROM facts WHERE user_id=? ORDER BY rowid", (self.user_id,)
+            "SELECT fact FROM facts WHERE user_id=? AND active=1 ORDER BY rowid",
+            (self.user_id,),
         )
         return [r["fact"] for r in rows]
+
+    def _match_active_fact(self, needle: str) -> sqlite3.Row | None:
+        """Find one active fact by loose substring, the way complete_tasks matches tasks."""
+        needle = (needle or "").strip().lower()
+        if not needle:
+            return None
+        rows = self.conn.execute(
+            "SELECT * FROM facts WHERE user_id=? AND active=1 ORDER BY rowid",
+            (self.user_id,),
+        ).fetchall()
+        for r in rows:
+            fact_lower = r["fact"].lower()
+            if needle in fact_lower or fact_lower in needle:
+                return r
+        return None
+
+    def update_fact(self, old_match: str, new_fact: str) -> str | None:
+        """
+        Supersede the fact matching `old_match` with `new_fact`.
+
+        The old row is deactivated rather than deleted, so a profile keeps its
+        history ("lived in Bengaluru" stays recoverable after moving to Dubai).
+        Returns the new fact text, or None if nothing matched / the text is unusable.
+        """
+        new_fact = (new_fact or "").strip()
+        if len(new_fact) < 3:
+            return None
+        row = self._match_active_fact(old_match)
+        if row is None:
+            return None
+        now = _now_iso()
+        self.conn.execute(
+            "UPDATE facts SET active=0, updated_at=? WHERE id=?", (now, row["id"])
+        )
+        self.conn.execute(
+            "INSERT INTO facts (id, user_id, fact, at, updated_at, active) VALUES (?,?,?,?,?,1)",
+            (_sid(), self.user_id, new_fact, row["at"], now),
+        )
+        self.conn.commit()
+        return new_fact
+
+    def remove_facts(self, matches: list[str]) -> list[str]:
+        """Deactivate facts the user has contradicted. Returns the texts removed."""
+        removed = []
+        now = _now_iso()
+        for m in matches:
+            row = self._match_active_fact(m)
+            if row is None:
+                continue
+            self.conn.execute(
+                "UPDATE facts SET active=0, updated_at=? WHERE id=?", (now, row["id"])
+            )
+            removed.append(row["fact"])
+        if removed:
+            self.conn.commit()
+        return removed
 
     # ── generic log (extensible to anything) ──
     def add_log(self, entries: list[dict]) -> list[dict]:

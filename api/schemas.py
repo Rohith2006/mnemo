@@ -46,6 +46,8 @@ class CaptureRequest(BaseModel):
 
 class CaptureResponse(BaseModel):
     facts: list[str]
+    facts_updated: list[str] = []   # facts this turn corrected (new text)
+    facts_removed: list[str] = []   # facts this turn retired (old text)
     log: list[dict]
     tasks: list[dict]
     done: list[dict]
