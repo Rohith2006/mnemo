@@ -226,6 +226,17 @@ def test_get_pending_expires_past_reminders():
     assert len(remaining) == 1 and remaining[0]["id"] == rid2
 
 
+def test_remove_for_user_drops_only_that_users_reminders():
+    fire_at = datetime.now().astimezone() + timedelta(hours=1)
+    store.reminder_store.add("mine", "call mom", fire_at)
+    store.reminder_store.add("theirs", "not mine", fire_at)
+
+    store.reminder_store.remove_for_user("mine")
+
+    assert store.reminder_store.get_all_for_user("mine") == []
+    assert len(store.reminder_store.get_all_for_user("theirs")) == 1
+
+
 def test_get_all_for_user_sorted_by_fire_time():
     later = datetime.now().astimezone() + timedelta(hours=2)
     sooner = datetime.now().astimezone() + timedelta(hours=1)

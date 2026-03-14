@@ -24,4 +24,7 @@ def update_me(body: UpdateMeRequest, user: dict = Depends(get_current_user)):
 
 @router.post("/forget", status_code=status.HTTP_204_NO_CONTENT)
 def forget(user: dict = Depends(get_current_user)):
+    # Reminders live in their own repository, so wiping the memory buckets alone
+    # would leave them behind — and the client promises "everything".
     get_store(user["user_id"]).forget_all()
+    store.reminder_store.remove_for_user(user["user_id"])

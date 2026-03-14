@@ -77,6 +77,20 @@ export async function cancelReminder(reminderId: string): Promise<void> {
   }
 }
 
+/** Cancel every reminder this device has scheduled. The server is the source of
+ * truth, so when its reminders are erased the local alarms have to go too —
+ * otherwise the phone keeps firing for reminders that no longer exist. */
+export async function cancelAll(): Promise<void> {
+  if (Platform.OS === "web") return;
+  try {
+    const map = await loadMap();
+    await Promise.all(Object.values(map).map((id) => Notifications.cancelScheduledNotificationAsync(id)));
+    await saveMap({});
+  } catch (e) {
+    console.warn("Could not cancel scheduled local reminder notifications", e);
+  }
+}
+
 /** Call on app foreground/launch: schedules any pending server reminder that
  * isn't already scheduled locally (covers reinstalls / a second device). */
 export async function reconcile(pending: ReminderOut[]): Promise<void> {

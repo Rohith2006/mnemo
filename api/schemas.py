@@ -1,6 +1,8 @@
 """Pydantic request/response models for the mobile API."""
 
-from pydantic import BaseModel, EmailStr, Field
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
 # ── auth ──────────────────────────────────────────────────────────────────────
@@ -31,6 +33,19 @@ class TokenResponse(BaseModel):
 class UpdateMeRequest(BaseModel):
     name: str | None = None
     tz: str | None = None
+
+    @field_validator("tz")
+    @classmethod
+    def _known_timezone(cls, v: str | None) -> str | None:
+        # Every authenticated route resolves ZoneInfo(user.tz); storing a name
+        # ZoneInfo can't load would 500 the whole account from then on.
+        if v is None:
+            return v
+        try:
+            ZoneInfo(v)
+        except (ZoneInfoNotFoundError, ValueError):
+            raise ValueError(f"unknown timezone: {v}")
+        return v
 
 
 # ── capture / chat ────────────────────────────────────────────────────────────

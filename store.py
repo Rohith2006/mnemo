@@ -579,6 +579,11 @@ class ReminderStore:
         self.conn.execute("DELETE FROM reminders WHERE id=?", (rid,))
         self.conn.commit()
 
+    def remove_for_user(self, user_id: str):
+        """Drop every reminder for one user — the reminders half of /forget."""
+        self.conn.execute("DELETE FROM reminders WHERE user_id=?", (str(user_id),))
+        self.conn.commit()
+
     def get_pending(self) -> list[dict]:
         now = datetime.now().astimezone()
         pending, expired = [], []

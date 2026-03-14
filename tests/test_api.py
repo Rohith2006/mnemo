@@ -5,6 +5,8 @@ test gets an isolated tmp-path SQLite DB via conftest's autouse `isolated_db`.""
 import json
 import subprocess
 import sys
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import anthropic
 import groq
@@ -270,3 +272,48 @@ def test_update_me_changes_name_and_tz(auth_headers):
     assert r.status_code == 200
     assert r.json()["name"] == "New Name"
     assert r.json()["tz"] == "America/New_York"
+
+
+def test_update_me_rejects_an_unknown_timezone(auth_headers):
+    """An unusable tz is persisted-then-exploded everywhere downstream, since
+    every authenticated route resolves ZoneInfo(user.tz) — reject it at the door
+    rather than leaving the account unable to load anything."""
+    r = client.patch("/api/me", json={"tz": "Mars/Olympus"}, headers=auth_headers)
+    assert r.status_code == 422
+    assert client.get("/api/dashboard", headers=auth_headers).status_code == 200
+
+
+def test_forget_also_clears_reminders(auth_headers, fake_llm):
+    """Settings promises "every ... reminder" is erased — so the pending
+    reminders must go with the rest of the data, not outlive the wipe."""
+    fake_llm.reminder = {"is_reminder": True, "task": "call mom", "seconds_from_now": 1800}
+    client.post("/api/capture", json={"text": "remind me to call mom"}, headers=auth_headers)
+    assert len(client.get("/api/reminders", headers=auth_headers).json()) == 1
+
+    client.post("/api/forget", headers=auth_headers)
+
+    assert client.get("/api/reminders", headers=auth_headers).json() == []
+
+
+def test_capture_survives_seconds_quoted_as_a_string(auth_headers, fake_llm):
+    fake_llm.reminder = {"is_reminder": True, "task": "call mom", "seconds_from_now": "1800"}
+    r = client.post("/api/capture", json={"text": "remind me to call mom"}, headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json()["reminder"]["task"] == "call mom"
+
+
+def test_habit_captured_is_dated_in_the_users_timezone(auth_headers, fake_llm, foreign_tz):
+    client.patch("/api/me", json={"tz": foreign_tz}, headers=auth_headers)
+    fake_llm.extraction = {"habits_done": ["Running"]}
+    client.post("/api/capture", json={"text": "went for a run"}, headers=auth_headers)
+
+    habits = client.get("/api/habits", headers=auth_headers).json()
+    assert habits[0]["last_done"] == datetime.now(ZoneInfo(foreign_tz)).date().isoformat()
+
+
+def test_habit_logged_by_tap_is_dated_in_the_users_timezone(auth_headers, foreign_tz):
+    client.patch("/api/me", json={"tz": foreign_tz}, headers=auth_headers)
+    client.post("/api/habits/Running/log", headers=auth_headers)
+
+    habits = client.get("/api/habits", headers=auth_headers).json()
+    assert habits[0]["last_done"] == datetime.now(ZoneInfo(foreign_tz)).date().isoformat()

@@ -169,6 +169,17 @@ def test_apply_extraction_persists_all_buckets():
     assert len(s.active_habits()) == 1
 
 
+def test_apply_extraction_dates_a_habit_by_the_users_timezone(foreign_tz):
+    """Streaks are counted in consecutive local days, so a habit has to be dated
+    on the user's calendar day — not on whatever day it is where the server runs."""
+    s = store.get_store("u1")
+    tz = ZoneInfo(foreign_tz)
+
+    brain.apply_extraction(s, {"habits_done": ["Running"]}, tz=tz)
+
+    assert s.active_habits()[0]["last_done"] == datetime.now(tz).date().isoformat()
+
+
 def test_apply_extraction_updates_a_superseded_fact():
     s = store.get_store("u1")
     s.add_facts(["Lives in Bengaluru"])
@@ -301,6 +312,24 @@ def test_detect_reminder_returns_none_when_task_missing(monkeypatch):
         lambda *a, **k: '{"is_reminder": true, "seconds_from_now": 1800}',
     )
     assert brain.detect_reminder("remind me", TZ) is None
+
+
+def test_detect_reminder_accepts_seconds_returned_as_a_string(monkeypatch):
+    """LLM JSON is untrusted input: a model that quotes the number must not crash
+    the whole capture request on a str-vs-int comparison."""
+    monkeypatch.setattr(
+        brain, "call_llm",
+        lambda *a, **k: '{"is_reminder": true, "task": "call mom", "seconds_from_now": "1800"}',
+    )
+    assert brain.detect_reminder("remind me to call mom", TZ) == {"task": "call mom", "seconds": 1800}
+
+
+def test_detect_reminder_returns_none_when_seconds_is_not_a_number(monkeypatch):
+    monkeypatch.setattr(
+        brain, "call_llm",
+        lambda *a, **k: '{"is_reminder": true, "task": "call mom", "seconds_from_now": "soon"}',
+    )
+    assert brain.detect_reminder("remind me to call mom", TZ) is None
 
 
 # ── build_reply (mocked LLM) ───────────────────────────────────────────────────

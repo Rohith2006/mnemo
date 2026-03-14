@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./client";
 import type { CaptureResponse, ChatMessage, ChatResponse, DashboardOut, DigestOut, HabitOut, TaskOut } from "./types";
-import { scheduleReminder, cancelReminder as cancelLocalReminder } from "../notifications";
+import { scheduleReminder, cancelReminder as cancelLocalReminder, cancelAll } from "../notifications";
 
 export function useDashboard() {
   return useQuery({ queryKey: ["dashboard"], queryFn: () => api.get<DashboardOut>("/api/dashboard") });
@@ -77,6 +77,9 @@ export function useForget() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: () => api.post<void>("/api/forget"),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["dashboard"] }),
+    onSuccess: async () => {
+      await cancelAll(); // the server dropped the reminders; drop their local alarms too
+      qc.invalidateQueries({ queryKey: ["dashboard"] });
+    },
   });
 }

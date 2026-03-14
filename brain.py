@@ -139,7 +139,7 @@ def extract(user_msg: str, assistant_msg: str, store, tz: ZoneInfo) -> dict:
     return data if isinstance(data, dict) else {}
 
 
-def apply_extraction(store, data: dict) -> dict:
+def apply_extraction(store, data: dict, tz: ZoneInfo | None = None) -> dict:
     changed = {"facts": [], "facts_updated": [], "facts_removed": [],
                "log": [], "tasks": [], "done": [], "habits": [], "mood": None}
     if not data:
@@ -169,9 +169,12 @@ def apply_extraction(store, data: dict) -> dict:
     if isinstance(data.get("tasks_done"), list):
         changed["done"] = store.complete_tasks([m for m in data["tasks_done"] if isinstance(m, str)])
     if isinstance(data.get("habits_done"), list):
+        # Streaks count consecutive *local* days, so date the habit on the user's
+        # calendar day rather than the server's — they can be a day apart.
+        today = datetime.now(tz).date() if tz else None
         for name in data["habits_done"]:
             if isinstance(name, str) and name.strip():
-                changed["habits"].append(store.log_habit(name))
+                changed["habits"].append(store.log_habit(name, on=today))
     mood = data.get("mood")
     if isinstance(mood, dict) and mood.get("score") is not None:
         try:
@@ -194,9 +197,15 @@ def detect_reminder(user_msg: str, tz: ZoneInfo) -> dict | None:
         'If NO: {"is_reminder": false}'
     )
     data = parse_json(call_llm([{"role": "user", "content": prompt}], temperature=0.0, max_tokens=150))
-    if isinstance(data, dict) and data.get("is_reminder") and data.get("task") and data.get("seconds_from_now", 0) > 0:
-        return {"task": data["task"], "seconds": int(data["seconds_from_now"])}
-    return None
+    if not isinstance(data, dict) or not data.get("is_reminder") or not data.get("task"):
+        return None
+    # LLM JSON is untrusted: the delay comes back quoted often enough that
+    # comparing it to 0 directly would raise TypeError on an otherwise fine turn.
+    try:
+        seconds = int(float(data.get("seconds_from_now", 0)))
+    except (TypeError, ValueError):
+        return None
+    return {"task": data["task"], "seconds": seconds} if seconds > 0 else None
 
 
 # ── Reply generation ────────────────────────────────────────────────────────

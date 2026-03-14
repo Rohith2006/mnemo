@@ -22,7 +22,7 @@ def capture(body: CaptureRequest, user: dict = Depends(get_current_user)):
     user_store = get_store(user["user_id"])
 
     reminder_hit = brain.detect_reminder(body.text, tz)
-    changed = brain.apply_extraction(user_store, brain.extract(body.text, "", user_store, tz))
+    changed = brain.apply_extraction(user_store, brain.extract(body.text, "", user_store, tz), tz)
 
     reminder_out = None
     if reminder_hit:

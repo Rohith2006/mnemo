@@ -33,5 +33,5 @@ def chat(body: ChatRequest, user: dict = Depends(get_current_user)):
         rid = store.reminder_store.add(user["user_id"], reminder_hit["task"], fire_at)
         reminder_out = ReminderOut(id=rid, task=reminder_hit["task"], fire_at=fire_at.isoformat())
 
-    brain.apply_extraction(user_store, brain.extract(body.message, reply, user_store, tz))
+    brain.apply_extraction(user_store, brain.extract(body.message, reply, user_store, tz), tz)
     return ChatResponse(reply=reply, reminder=reminder_out)
