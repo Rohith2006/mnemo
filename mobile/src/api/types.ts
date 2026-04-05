@@ -43,6 +43,7 @@ export type TaskOut = {
   task: string;
   due: string | null;
   status: string;
+  done_at: string | null;
 };
 
 export type HabitOut = {
@@ -68,6 +69,7 @@ export type DashboardOut = {
   profile: string[];
   habits: HabitOut[];
   tasks: TaskOut[];
+  completed: TaskOut[];
   trends: string[];
   log: LogEntryOut[];
   mood: MoodOut | null;

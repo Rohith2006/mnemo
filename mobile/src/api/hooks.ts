@@ -38,6 +38,14 @@ export function useCompleteTask() {
   });
 }
 
+export function useReopenTask() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post<TaskOut>(`/api/tasks/${id}/reopen`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["dashboard"] }),
+  });
+}
+
 export function useAddTask() {
   const qc = useQueryClient();
   return useMutation({

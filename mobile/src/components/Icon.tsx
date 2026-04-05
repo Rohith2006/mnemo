@@ -9,6 +9,7 @@ import {
   BookmarkCheck,
   BookmarkMinus,
   Check,
+  ChevronDown,
   Circle,
   CircleCheck,
   Flame,
@@ -25,6 +26,7 @@ import {
   Sunrise,
   Trash2,
   TrendingUp,
+  Undo2,
   User,
   X,
 } from "lucide-react-native";
@@ -58,6 +60,8 @@ const REGISTRY = {
   send: ArrowUp,
   check: Check,
   close: X,
+  chevronDown: ChevronDown,
+  undo: Undo2,
 
   user: User,
   email: Mail,
