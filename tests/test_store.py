@@ -105,6 +105,34 @@ def test_complete_task_by_id_marks_done_and_ignores_unknown_id():
     assert s.complete_task_by_id("no-such-id") is None
 
 
+def test_completed_tasks_lists_done_most_recent_first():
+    s = store.get_store("u1")
+    added = s.add_tasks([{"task": "First"}, {"task": "Second"}])
+    s.complete_task_by_id(added[0]["id"])
+    s.complete_task_by_id(added[1]["id"])
+    assert [t["task"] for t in s.completed_tasks()] == ["Second", "First"]
+    assert all(t["status"] == "done" and t["done_at"] for t in s.completed_tasks())
+
+
+def test_reopen_task_moves_done_back_to_open():
+    s = store.get_store("u1")
+    added = s.add_tasks([{"task": "Submit report"}])
+    s.complete_task_by_id(added[0]["id"])
+
+    reopened = s.reopen_task(added[0]["id"])
+    assert reopened["status"] == "open"
+    assert reopened["done_at"] is None
+    assert [t["task"] for t in s.open_tasks()] == ["Submit report"]
+    assert s.completed_tasks() == []
+
+
+def test_reopen_task_ignores_unknown_or_still_open_id():
+    s = store.get_store("u1")
+    added = s.add_tasks([{"task": "Submit report"}])
+    assert s.reopen_task("no-such-id") is None
+    assert s.reopen_task(added[0]["id"]) is None  # still open, not done
+
+
 def test_complete_tasks_matches_by_substring_either_direction():
     s = store.get_store("u1")
     s.add_tasks([{"task": "Submit the quarterly report"}])
@@ -124,6 +152,34 @@ def test_overdue_and_due_within_partition_correctly():
     s.add_tasks([{"task": "Due later", "due": far}])
     assert [t["task"] for t in s.overdue_tasks(tz)] == ["Overdue thing"]
     assert [t["task"] for t in s.tasks_due_within(24, tz)] == ["Due soon"]
+
+
+def test_overdue_tasks_date_only_due_today_is_not_overdue():
+    # A date-only due ("no time mentioned") for today must not be overdue no
+    # matter how late in the day it already is — there's no time to have missed.
+    s = store.get_store("u1")
+    tz = ZoneInfo("Asia/Kolkata")
+    today = datetime.now(tz).date().isoformat()
+    s.add_tasks([{"task": "Due today, no time", "due": today}])
+    assert s.overdue_tasks(tz) == []
+
+
+def test_overdue_tasks_date_only_due_yesterday_is_overdue():
+    s = store.get_store("u1")
+    tz = ZoneInfo("Asia/Kolkata")
+    yesterday = (datetime.now(tz).date() - timedelta(days=1)).isoformat()
+    s.add_tasks([{"task": "Due yesterday, no time", "due": yesterday}])
+    assert [t["task"] for t in s.overdue_tasks(tz)] == ["Due yesterday, no time"]
+
+
+def test_overdue_tasks_with_explicit_past_time_today_is_overdue():
+    # A due date WITH a time is still judged against the exact instant, even
+    # when that instant falls earlier today.
+    s = store.get_store("u1")
+    tz = ZoneInfo("Asia/Kolkata")
+    earlier_today = (datetime.now(tz) - timedelta(hours=1)).isoformat()
+    s.add_tasks([{"task": "Due earlier today, with time", "due": earlier_today}])
+    assert [t["task"] for t in s.overdue_tasks(tz)] == ["Due earlier today, with time"]
 
 
 # ── habits ───────────────────────────────────────────────────────────────────

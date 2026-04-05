@@ -196,6 +196,44 @@ def test_complete_unknown_task_404s(auth_headers):
     assert r.status_code == 404
 
 
+def test_completed_task_appears_in_dashboard_completed_log(auth_headers):
+    r = client.post("/api/tasks", json={"task": "Buy milk"}, headers=auth_headers)
+    task_id = r.json()[0]["id"]
+    client.post(f"/api/tasks/{task_id}/complete", headers=auth_headers)
+
+    dash = client.get("/api/dashboard", headers=auth_headers).json()
+    assert dash["tasks"] == []
+    assert [t["task"] for t in dash["completed"]] == ["Buy milk"]
+    assert dash["completed"][0]["status"] == "done"
+    assert dash["completed"][0]["done_at"] is not None
+
+
+def test_reopen_task_moves_it_back_to_open(auth_headers):
+    r = client.post("/api/tasks", json={"task": "Buy milk"}, headers=auth_headers)
+    task_id = r.json()[0]["id"]
+    client.post(f"/api/tasks/{task_id}/complete", headers=auth_headers)
+
+    reopened = client.post(f"/api/tasks/{task_id}/reopen", headers=auth_headers)
+    assert reopened.status_code == 200
+    assert reopened.json()["status"] == "open"
+
+    dash = client.get("/api/dashboard", headers=auth_headers).json()
+    assert [t["task"] for t in dash["tasks"]] == ["Buy milk"]
+    assert dash["completed"] == []
+
+
+def test_reopen_unknown_task_404s(auth_headers):
+    r = client.post("/api/tasks/does-not-exist/reopen", headers=auth_headers)
+    assert r.status_code == 404
+
+
+def test_reopen_still_open_task_404s(auth_headers):
+    r = client.post("/api/tasks", json={"task": "Buy milk"}, headers=auth_headers)
+    task_id = r.json()[0]["id"]
+    r = client.post(f"/api/tasks/{task_id}/reopen", headers=auth_headers)
+    assert r.status_code == 404
+
+
 def test_log_habit_direct_action(auth_headers):
     r = client.post("/api/habits/Running/log", headers=auth_headers)
     assert r.status_code == 200

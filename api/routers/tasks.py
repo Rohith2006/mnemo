@@ -28,3 +28,13 @@ def complete_task(task_id: str, user: dict = Depends(get_current_user)):
     if done is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "no open task with that id")
     return TaskOut(id=done["id"], task=done["task"], due=done.get("due"), status=done["status"])
+
+
+@router.post("/{task_id}/reopen", response_model=TaskOut)
+def reopen_task(task_id: str, user: dict = Depends(get_current_user)):
+    store = get_store(user["user_id"])
+    reopened = store.reopen_task(task_id)
+    if reopened is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "no completed task with that id")
+    return TaskOut(id=reopened["id"], task=reopened["task"], due=reopened.get("due"),
+                    status=reopened["status"])

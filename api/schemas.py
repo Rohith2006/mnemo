@@ -92,6 +92,7 @@ class TaskOut(BaseModel):
     task: str
     due: str | None
     status: str
+    done_at: str | None = None
 
 
 class TaskCreate(BaseModel):
@@ -123,6 +124,7 @@ class DashboardOut(BaseModel):
     profile: list[str]
     habits: list[HabitOut]
     tasks: list[TaskOut]
+    completed: list[TaskOut]
     trends: list[str]
     log: list[LogEntryOut]
     mood: MoodOut | None

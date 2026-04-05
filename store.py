@@ -268,6 +268,14 @@ class UserStore:
         )
         return [_task_row_to_dict(r) for r in rows]
 
+    def completed_tasks(self, limit: int = 30) -> list[dict]:
+        """Most-recently-completed first — the closed-by-default "Completed" log."""
+        rows = self.conn.execute(
+            "SELECT * FROM tasks WHERE user_id=? AND status='done' ORDER BY done_at DESC LIMIT ?",
+            (self.user_id, limit),
+        )
+        return [_task_row_to_dict(r) for r in rows]
+
     def complete_tasks(self, matches: list[str]) -> list[dict]:
         done = []
         now = _now_iso()
@@ -313,6 +321,7 @@ class UserStore:
 
     def overdue_tasks(self, tz: ZoneInfo) -> list[dict]:
         now = datetime.now(tz)
+        today = now.date()
         out = []
         for t in self.open_tasks():
             if not t.get("due"):
@@ -323,7 +332,12 @@ class UserStore:
                     due = due.replace(tzinfo=tz)
             except ValueError:
                 continue
-            if due < now:
+            # A date-only due (no time given) only counts as overdue once that whole
+            # day has passed — not from midnight of the due day itself, which would
+            # flag a task due "today" as overdue for most of today.
+            has_time = "T" in t["due"]
+            is_overdue = due < now if has_time else due.date() < today
+            if is_overdue:
                 out.append({**t, "due_dt": due})
         return sorted(out, key=lambda x: x["due_dt"])
 
@@ -495,6 +509,20 @@ class UserStore:
         self.conn.commit()
         d = _task_row_to_dict(row)
         d["status"], d["done_at"] = "done", now
+        return d
+
+    def reopen_task(self, task_id: str) -> dict | None:
+        """Undo a completion — moves a done task back to open, for the Completed log's undo action."""
+        row = self.conn.execute(
+            "SELECT * FROM tasks WHERE user_id=? AND id=? AND status='done'",
+            (self.user_id, task_id),
+        ).fetchone()
+        if not row:
+            return None
+        self.conn.execute("UPDATE tasks SET status='open', done_at=NULL WHERE id=?", (task_id,))
+        self.conn.commit()
+        d = _task_row_to_dict(row)
+        d["status"], d["done_at"] = "open", None
         return d
 
 
