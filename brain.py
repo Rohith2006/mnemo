@@ -85,6 +85,52 @@ def parse_json(raw: str):
         return None
 
 
+def _upcoming_dates_table(now: datetime, days: int = 14) -> str:
+    """
+    A weekday-name -> ISO-date lookup for the next `days` days. Handing the model
+    this table instead of making it compute "next Friday" from a raw date itself
+    avoids the day-of-week arithmetic mistakes small/fast models occasionally make
+    under time pressure (e.g. resolving "by Friday" to a Tuesday) — it only has to
+    read a row, not calculate one.
+    """
+    lines = []
+    for i in range(days):
+        d = (now + timedelta(days=i)).date()
+        label = "today" if i == 0 else "tomorrow" if i == 1 else d.strftime("%A")
+        lines.append(f"{d.isoformat()} = {label}")
+    return "\n".join(lines)
+
+
+_WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+_DUE_DATE_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})(.*)$")
+
+
+def _correct_weekday_due(user_msg: str, due: str, now: datetime) -> str:
+    """
+    Even with the lookup table above, a low-effort model occasionally still gets
+    day-of-week arithmetic wrong (observed: "by Friday" resolved to a Tuesday).
+    When the message names exactly one weekday, don't trust the model's arithmetic
+    at all — deterministically overwrite the date portion with the nearest
+    matching weekday (today counts, since "by Friday" said on a Friday means
+    today). Skipped when the message names zero or multiple weekdays, since which
+    one the due date refers to is then genuinely ambiguous.
+    """
+    if not due:
+        return due
+    m = _DUE_DATE_RE.match(due)
+    if not m:
+        return due
+    found = [w for w in _WEEKDAYS if re.search(rf"\b{w}\b", user_msg, re.IGNORECASE)]
+    if len(found) != 1:
+        return due
+    today = now.date()
+    delta = (_WEEKDAYS.index(found[0]) - today.weekday()) % 7
+    correct_date = today + timedelta(days=delta)
+    if m.group(1) == correct_date.isoformat():
+        return due
+    return correct_date.isoformat() + m.group(2)
+
+
 def human_duration(seconds: int) -> str:
     if seconds < 60:
         return f"{seconds} second{'s' if seconds != 1 else ''}"
@@ -122,9 +168,14 @@ def extract(user_msg: str, assistant_msg: str, store, tz: ZoneInfo) -> dict:
         '  "facts_remove": ["substring of an existing fact that is no longer true"]\n'
         "}\n"
         "Rules: omit empty arrays' contents rather than inventing. Resolve relative dates "
-        "('tomorrow 6pm') to absolute ISO8601 in the user's timezone. Use null for unknown due. "
+        "('tomorrow 6pm', 'by Friday', 'next Monday') to absolute ISO8601 in the user's timezone "
+        "by LOOKING UP the weekday name in the UPCOMING DATES table below — do not compute the "
+        "weekday yourself. A bare weekday name and 'next <weekday>' mean the SAME thing: the "
+        "closest matching date in the table that is still in the future (never skip an extra week "
+        "just because the user said 'next'). Use null for unknown due. "
         "habits = things done repeatedly (running, journaling, gym, meditation). "
         "Skip greetings/small talk.\n"
+        f"UPCOMING DATES:\n{_upcoming_dates_table(now)}\n\n"
         "Reconcile against EXISTING FACTS instead of piling up duplicates and contradictions: "
         "if this turn supersedes a known fact (moved city, changed job, new diet), put it in "
         "\"facts_update\"; if a known fact is simply no longer true with nothing replacing it, "
@@ -136,7 +187,13 @@ def extract(user_msg: str, assistant_msg: str, store, tz: ZoneInfo) -> dict:
         f"User: {user_msg}\nAssistant: {assistant_msg}"
     )
     data = parse_json(call_llm([{"role": "user", "content": prompt}], temperature=0.1, max_tokens=600))
-    return data if isinstance(data, dict) else {}
+    if not isinstance(data, dict):
+        return {}
+    if isinstance(data.get("tasks_new"), list):
+        for t in data["tasks_new"]:
+            if isinstance(t, dict) and isinstance(t.get("due"), str):
+                t["due"] = _correct_weekday_due(user_msg, t["due"], now)
+    return data
 
 
 def apply_extraction(store, data: dict, tz: ZoneInfo | None = None) -> dict:
@@ -193,7 +250,11 @@ def detect_reminder(user_msg: str, tz: ZoneInfo) -> dict | None:
         "forget', 'alert me', 'ping me')?\n\n"
         f"Message: {user_msg}\n\n"
         'If YES, respond with JSON only: {"is_reminder": true, "task": "<what>", "seconds_from_now": <int>}\n'
-        "Compute seconds precisely (30 min=1800, 2 h=7200, 'tomorrow 9am'=seconds until then).\n"
+        "Compute seconds precisely (30 min=1800, 2 h=7200, 'tomorrow 9am'=seconds until then). If the "
+        "message names a weekday ('Friday', 'next Monday'), look up its date in this table instead of "
+        "computing the weekday yourself — a bare weekday name and 'next <weekday>' mean the SAME "
+        "thing: the closest matching date below that is still in the future — then work out "
+        f"seconds_from_now from that date:\n{_upcoming_dates_table(now)}\n\n"
         'If NO: {"is_reminder": false}'
     )
     data = parse_json(call_llm([{"role": "user", "content": prompt}], temperature=0.0, max_tokens=150))

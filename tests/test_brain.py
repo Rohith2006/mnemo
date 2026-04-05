@@ -283,6 +283,55 @@ def test_extract_prompt_includes_open_tasks_and_habits(monkeypatch):
     assert "Running" in captured["prompt"]
 
 
+# ── _correct_weekday_due ──────────────────────────────────────────────────────
+# Regression coverage for a real bug: the extraction model (a low-effort fast
+# model) resolved "by Friday" to a Tuesday. Rather than trust model arithmetic,
+# extract() deterministically overrides the date when exactly one weekday is named.
+_SAT = datetime(2026, 8, 29, 10, 0, tzinfo=TZ)  # a known Saturday
+
+
+def test_correct_weekday_due_fixes_wrong_weekday():
+    assert brain._correct_weekday_due("finish report by Friday", "2026-09-01", _SAT) == "2026-09-04"
+
+
+def test_correct_weekday_due_leaves_correct_date_alone():
+    assert brain._correct_weekday_due("finish report by Friday", "2026-09-04", _SAT) == "2026-09-04"
+
+
+def test_correct_weekday_due_preserves_time_component():
+    due = "2026-09-01T15:00:00+05:30"
+    assert brain._correct_weekday_due("call at 3pm on Wednesday", due, _SAT) == "2026-09-02T15:00:00+05:30"
+
+
+def test_correct_weekday_due_today_is_named_weekday():
+    assert brain._correct_weekday_due("finish it by Saturday", "2026-09-05", _SAT) == "2026-08-29"
+
+
+def test_correct_weekday_due_skips_when_no_weekday_named():
+    assert brain._correct_weekday_due("finish it tomorrow", "2026-09-10", _SAT) == "2026-09-10"
+
+
+def test_correct_weekday_due_skips_when_multiple_weekdays_named():
+    assert brain._correct_weekday_due("either Monday or Friday works", "2026-09-01", _SAT) == "2026-09-01"
+
+
+def test_correct_weekday_due_skips_falsy_due():
+    assert brain._correct_weekday_due("finish by Friday", None, _SAT) is None
+    assert brain._correct_weekday_due("finish by Friday", "", _SAT) == ""
+
+
+def test_extract_corrects_wrong_weekday_due(monkeypatch):
+    s = store.get_store("u1")
+    monkeypatch.setattr(
+        brain, "call_llm",
+        lambda *a, **k: '{"tasks_new": [{"task": "finish report", "due": "2099-01-01"}]}',
+    )
+    result = brain.extract("finish report by Friday", "Sure!", s, TZ)
+    due = result["tasks_new"][0]["due"]
+    assert due != "2099-01-01"
+    assert datetime.fromisoformat(due).strftime("%A") == "Friday"
+
+
 # ── detect_reminder (mocked LLM) ──────────────────────────────────────────────
 def test_detect_reminder_returns_none_when_not_a_reminder(monkeypatch):
     monkeypatch.setattr(brain, "call_llm", lambda *a, **k: '{"is_reminder": false}')
