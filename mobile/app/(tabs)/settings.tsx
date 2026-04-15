@@ -1,5 +1,5 @@
 import React from "react";
-import { Alert, ScrollView, useWindowDimensions, View } from "react-native";
+import { Alert, Platform, ScrollView, useWindowDimensions, View } from "react-native";
 import { useAuth } from "../../src/auth/AuthContext";
 import { useForget } from "../../src/api/hooks";
 import { Group, Row, SectionHeader } from "../../src/components/List";
@@ -18,14 +18,18 @@ export default function SettingsScreen() {
   const forget = useForget();
 
   const confirmForget = () => {
-    Alert.alert(
-      "Erase everything?",
-      "This deletes every fact, log entry, task, habit, mood entry and reminder. It cannot be undone.",
-      [
-        { text: "Cancel", style: "cancel" },
-        { text: "Erase", style: "destructive", onPress: () => forget.mutate() },
-      ],
-    );
+    const message =
+      "This deletes every fact, log entry, task, habit, mood entry and reminder. It cannot be undone.";
+    // Alert.alert is a no-op on react-native-web (it renders nothing and never
+    // calls back) — window.confirm is the platform-correct equivalent there.
+    if (Platform.OS === "web") {
+      if (window.confirm(`Erase everything?\n\n${message}`)) forget.mutate();
+      return;
+    }
+    Alert.alert("Erase everything?", message, [
+      { text: "Cancel", style: "cancel" },
+      { text: "Erase", style: "destructive", onPress: () => forget.mutate() },
+    ]);
   };
 
   return (
