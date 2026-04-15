@@ -73,7 +73,16 @@ export default function CaptureScreen() {
 
   return (
     <Screen>
-      <TopBar title="Capture" showTitle={scrolled} leading={<Wordmark size={20} />} />
+      <TopBar
+        title="Capture"
+        showTitle={scrolled}
+        leading={<Wordmark size={20} />}
+        trailing={
+          <Text variant="footnote" tone="faint">
+            {today()}
+          </Text>
+        }
+      />
       <KeyboardAvoidingView
         style={{ flex: 1 }}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -91,7 +100,7 @@ export default function CaptureScreen() {
           renderItem={({ item }) => <Receipt text={item.text} at={item.at} result={item.result} />}
           ListHeaderComponent={
             <View>
-              <LargeTitle title="Capture" subtitle={today()} />
+              <LargeTitle title="Capture" />
 
               {dash?.alerts.map((a, i) => (
                 <Callout key={i} text={a} tone="caution" />
@@ -109,6 +118,10 @@ export default function CaptureScreen() {
                   style={[
                     typeScale.body,
                     { color: t.ink, padding: space.lg, minHeight: 104, textAlignVertical: "top" },
+                    // The browser's default focus ring on a web <textarea> would
+                    // otherwise show alongside this component's own border —
+                    // an RNW-only style extension @types/react-native doesn't model.
+                    { outlineStyle: "none" } as object,
                   ]}
                 />
                 {/* The placeholder already demonstrates what this understands,
@@ -209,5 +222,5 @@ export default function CaptureScreen() {
 }
 
 function today() {
-  return new Date().toLocaleDateString([], { weekday: "long", day: "numeric", month: "long" });
+  return new Date().toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" });
 }
