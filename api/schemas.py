@@ -86,6 +86,25 @@ class ChatResponse(BaseModel):
     reminder: ReminderOut | None
 
 
+# ── conversations ─────────────────────────────────────────────────────────────
+class ConversationOut(BaseModel):
+    id: str
+    title: str
+    created_at: str
+    updated_at: str
+
+
+class ChatMessageOut(BaseModel):
+    id: str
+    role: str
+    content: str
+    created_at: str
+
+
+class ConversationRenameRequest(BaseModel):
+    title: str = Field(min_length=1, max_length=100)
+
+
 # ── tasks / habits ────────────────────────────────────────────────────────────
 class TaskOut(BaseModel):
     id: str

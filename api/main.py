@@ -21,7 +21,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from api import auth as auth_module
-from api.routers import account, auth, capture, chat, dashboard, digests, habits, reminders, tasks
+from api.routers import account, auth, capture, chat, conversations, dashboard, digests, habits, reminders, tasks
 
 if auth_module.JWT_SECRET == auth_module._DEV_SECRET:
     print("[api] WARNING: MNEMO_JWT_SECRET not set — using an insecure default dev secret. "
@@ -39,7 +39,7 @@ app.add_middleware(
 )
 
 for router in (auth.router, account.router, dashboard.router, capture.router, chat.router,
-               tasks.router, habits.router, reminders.router, digests.router):
+               conversations.router, tasks.router, habits.router, reminders.router, digests.router):
     app.include_router(router)
 
 

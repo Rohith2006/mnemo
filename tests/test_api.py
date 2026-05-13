@@ -179,6 +179,79 @@ def test_chat_returns_conversational_reply(auth_headers, fake_llm):
     assert r.json()["reply"] == "Nice, keep it up!"
 
 
+# ── conversations ─────────────────────────────────────────────────────────────
+def _second_user_headers(fake_llm):
+    r = client.post("/auth/signup", json={"email": "b@example.com", "password": "password123", "name": "B"})
+    assert r.status_code == 201
+    return {"Authorization": f"Bearer {r.json()['access_token']}"}
+
+
+def test_list_conversations_empty_when_none_exist(auth_headers):
+    r = client.get("/api/conversations", headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json() == []
+
+
+def test_conversation_lifecycle_via_chat_then_list_then_messages(auth_headers, fake_llm):
+    fake_llm.reply = "Sure thing!"
+    r = client.post("/api/chat", json={"message": "Help me plan my day"}, headers=auth_headers)
+    conversation_id = r.json()["conversation_id"]
+
+    listed = client.get("/api/conversations", headers=auth_headers).json()
+    assert len(listed) == 1
+    assert listed[0]["id"] == conversation_id
+    assert listed[0]["title"] == "Help me plan my day"
+
+    messages = client.get(f"/api/conversations/{conversation_id}/messages", headers=auth_headers).json()
+    assert [(m["role"], m["content"]) for m in messages] == [
+        ("user", "Help me plan my day"),
+        ("assistant", "Sure thing!"),
+    ]
+
+
+def test_get_messages_404s_for_unknown_conversation(auth_headers):
+    r = client.get("/api/conversations/no-such-id/messages", headers=auth_headers)
+    assert r.status_code == 404
+
+
+def test_get_messages_404s_for_another_users_conversation(auth_headers, fake_llm):
+    other_headers = _second_user_headers(fake_llm)
+    r = client.post("/api/chat", json={"message": "My private chat"}, headers=other_headers)
+    conversation_id = r.json()["conversation_id"]
+
+    r2 = client.get(f"/api/conversations/{conversation_id}/messages", headers=auth_headers)
+    assert r2.status_code == 404
+
+
+def test_rename_conversation(auth_headers, fake_llm):
+    r = client.post("/api/chat", json={"message": "First title"}, headers=auth_headers)
+    conversation_id = r.json()["conversation_id"]
+
+    renamed = client.patch(f"/api/conversations/{conversation_id}", json={"title": "Better title"},
+                            headers=auth_headers)
+    assert renamed.status_code == 200
+    assert renamed.json()["title"] == "Better title"
+
+
+def test_rename_unknown_conversation_404s(auth_headers):
+    r = client.patch("/api/conversations/no-such-id", json={"title": "New title"}, headers=auth_headers)
+    assert r.status_code == 404
+
+
+def test_delete_conversation(auth_headers, fake_llm):
+    r = client.post("/api/chat", json={"message": "Delete me"}, headers=auth_headers)
+    conversation_id = r.json()["conversation_id"]
+
+    deleted = client.delete(f"/api/conversations/{conversation_id}", headers=auth_headers)
+    assert deleted.status_code == 204
+    assert client.get("/api/conversations", headers=auth_headers).json() == []
+
+
+def test_delete_unknown_conversation_404s(auth_headers):
+    r = client.delete("/api/conversations/no-such-id", headers=auth_headers)
+    assert r.status_code == 404
+
+
 # ── tasks / habits direct actions (no LLM involved) ──────────────────────────
 def test_add_and_complete_task_without_llm(auth_headers):
     r = client.post("/api/tasks", json={"task": "Buy milk"}, headers=auth_headers)
