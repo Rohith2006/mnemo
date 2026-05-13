@@ -213,6 +213,17 @@ def test_chat_with_unknown_conversation_id_404s(auth_headers, fake_llm):
     assert r.status_code == 404
 
 
+def test_chat_with_empty_string_conversation_id_404s_rather_than_creating_new(auth_headers, fake_llm):
+    # An empty string is falsy but not None — a plain `if body.conversation_id:`
+    # check would treat it the same as "omitted" and silently start a new
+    # conversation instead of 404ing, which is exactly the "silent fallback"
+    # the global constraints rule out.
+    r = client.post(
+        "/api/chat", json={"message": "hi", "conversation_id": ""}, headers=auth_headers
+    )
+    assert r.status_code == 404
+
+
 def test_chat_caps_llm_history_to_last_20_messages(auth_headers, fake_llm):
     fake_llm.reply = "ok"
     conversation_id = client.post(

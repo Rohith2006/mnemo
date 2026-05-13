@@ -26,7 +26,7 @@ def chat(body: ChatRequest, user: dict = Depends(get_current_user)):
     tz = store.registry.tz(user["user_id"])
     user_store = get_store(user["user_id"])
 
-    if body.conversation_id:
+    if body.conversation_id is not None:
         prior_messages = user_store.conversation_messages(body.conversation_id)
         if prior_messages is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "no conversation with that id")
