@@ -71,18 +71,14 @@ class CaptureResponse(BaseModel):
     reminder: ReminderOut | None
 
 
-class ChatMessage(BaseModel):
-    role: str
-    content: str
-
-
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1)
-    history: list[ChatMessage] = []
+    conversation_id: str | None = None
 
 
 class ChatResponse(BaseModel):
     reply: str
+    conversation_id: str
     reminder: ReminderOut | None
 
 

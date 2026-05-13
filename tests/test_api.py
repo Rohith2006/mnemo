@@ -30,10 +30,12 @@ class FakeLLM:
         self.reply = "Got it."
         self.digest = "Nothing much going on."
         self.calls = 0
+        self.history: list[str] = []  # every prompt text seen, for assertions on what was sent
 
     def __call__(self, messages, **kwargs):
         self.calls += 1
         text = " ".join(m.get("content", "") for m in messages)
+        self.history.append(text)
         if "memory engine of a personal assistant" in text:
             return json.dumps(self.extraction)
         if "ask to be reminded" in text:
@@ -172,11 +174,61 @@ def test_groq_unreachable_also_returns_clean_502(auth_headers, monkeypatch):
 
 
 # ── chat (secondary, conversational) ─────────────────────────────────────────
-def test_chat_returns_conversational_reply(auth_headers, fake_llm):
+def test_chat_without_conversation_id_creates_one(auth_headers, fake_llm):
     fake_llm.reply = "Nice, keep it up!"
     r = client.post("/api/chat", json={"message": "ran 5k today"}, headers=auth_headers)
     assert r.status_code == 200
-    assert r.json()["reply"] == "Nice, keep it up!"
+    body = r.json()
+    assert body["reply"] == "Nice, keep it up!"
+    assert body["conversation_id"]
+
+
+def test_chat_with_conversation_id_continues_it(auth_headers, fake_llm):
+    fake_llm.reply = "First reply"
+    first = client.post("/api/chat", json={"message": "First message"}, headers=auth_headers)
+    conversation_id = first.json()["conversation_id"]
+
+    fake_llm.reply = "Second reply"
+    second = client.post(
+        "/api/chat",
+        json={"message": "Second message", "conversation_id": conversation_id},
+        headers=auth_headers,
+    )
+    assert second.status_code == 200
+    assert second.json()["conversation_id"] == conversation_id
+
+    messages = client.get(f"/api/conversations/{conversation_id}/messages", headers=auth_headers).json()
+    assert [(m["role"], m["content"]) for m in messages] == [
+        ("user", "First message"),
+        ("assistant", "First reply"),
+        ("user", "Second message"),
+        ("assistant", "Second reply"),
+    ]
+
+
+def test_chat_with_unknown_conversation_id_404s(auth_headers, fake_llm):
+    r = client.post(
+        "/api/chat", json={"message": "hi", "conversation_id": "no-such-id"}, headers=auth_headers
+    )
+    assert r.status_code == 404
+
+
+def test_chat_caps_llm_history_to_last_20_messages(auth_headers, fake_llm):
+    fake_llm.reply = "ok"
+    conversation_id = client.post(
+        "/api/chat", json={"message": "message 0"}, headers=auth_headers
+    ).json()["conversation_id"]
+    for i in range(1, 12):
+        client.post(
+            "/api/chat", json={"message": f"message {i}", "conversation_id": conversation_id},
+            headers=auth_headers,
+        )
+    # By the 12th call (i=11), 22 prior messages exist (11 turns * 2). Capped
+    # to the last 20, the oldest turn ("message 0" and its reply) must have
+    # dropped out of what's sent to the LLM, while a recent one is still in.
+    last_prompt = [c for c in fake_llm.history if "warm, proactive personal assistant" in c][-1]
+    assert "message 0" not in last_prompt
+    assert "message 10" in last_prompt
 
 
 # ── conversations ─────────────────────────────────────────────────────────────
