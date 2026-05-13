@@ -112,6 +112,10 @@ export function Field({ label, hint, error, style, ...rest }: FieldProps) {
             minHeight: 48,
             color: t.ink,
           },
+          // The browser's default focus ring on a web <input> would otherwise
+          // show alongside this field's own focused-border colour — an RNW-only
+          // style extension @types/react-native doesn't model.
+          { outlineStyle: "none" } as object,
           style,
         ]}
       />

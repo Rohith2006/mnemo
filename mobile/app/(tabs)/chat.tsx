@@ -142,9 +142,22 @@ export default function ChatScreen() {
               placeholderTextColor={t.inkFaint}
               multiline
               accessibilityLabel="Message"
+              // Enter sends, Shift+Enter inserts a newline — calling preventDefault
+              // here stops both the browser's own newline insertion and RNW's
+              // internal onSubmitEditing/blur handling for this keystroke.
+              onKeyPress={(e: any) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  send();
+                }
+              }}
               style={[
                 typeScale.body,
                 { flex: 1, color: t.ink, maxHeight: 120, paddingVertical: space.sm },
+                // The browser's default focus ring on a web <textarea> would
+                // otherwise show alongside this component's own border — an
+                // RNW-only style extension @types/react-native doesn't model.
+                { outlineStyle: "none" } as object,
               ]}
             />
             <SendButton onPress={send} disabled={!input.trim()} loading={chat.isPending} />
