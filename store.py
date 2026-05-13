@@ -45,6 +45,19 @@ def _value_to_text(value):
     return None if value is None else str(value)
 
 
+def _derive_title(message: str) -> str:
+    """First-message-derived conversation title: collapse whitespace, truncate
+    to ~50 chars on a word boundary with an ellipsis, or a hard cut if there's
+    no space to break on."""
+    message = " ".join(message.split())
+    if len(message) <= 50:
+        return message
+    cut = message[:50]
+    if " " in cut:
+        cut = cut.rsplit(" ", 1)[0]
+    return f"{cut}…"
+
+
 def _log_row_to_dict(r: sqlite3.Row) -> dict:
     return {
         "id": r["id"], "category": r["category"], "key": r["key"],
@@ -64,6 +77,17 @@ def _habit_row_to_dict(r: sqlite3.Row) -> dict:
         "id": r["id"], "name": r["name"], "streak": r["streak"],
         "best_streak": r["best_streak"], "last_done": r["last_done"], "cadence": r["cadence"],
     }
+
+
+def _conversation_row_to_dict(r: sqlite3.Row) -> dict:
+    return {
+        "id": r["id"], "title": r["title"],
+        "created_at": r["created_at"], "updated_at": r["updated_at"],
+    }
+
+
+def _message_row_to_dict(r: sqlite3.Row) -> dict:
+    return {"id": r["id"], "role": r["role"], "content": r["content"], "created_at": r["created_at"]}
 
 
 def _user_row_to_dict(r: sqlite3.Row) -> dict:
@@ -492,7 +516,15 @@ class UserStore:
     # ── reset ──
     def forget_all(self) -> None:
         """Wipe every bucket for this user (the /forget command)."""
-        for table in ("facts", "log_entries", "tasks", "habits", "journal", "digests"):
+        conv_ids = [r["id"] for r in self.conn.execute(
+            "SELECT id FROM conversations WHERE user_id=?", (self.user_id,)
+        )]
+        if conv_ids:
+            placeholders = ",".join("?" * len(conv_ids))
+            self.conn.execute(
+                f"DELETE FROM chat_messages WHERE conversation_id IN ({placeholders})", conv_ids
+            )
+        for table in ("facts", "log_entries", "tasks", "habits", "journal", "digests", "conversations"):
             self.conn.execute(f"DELETE FROM {table} WHERE user_id=?", (self.user_id,))
         self.conn.commit()
 
@@ -524,6 +556,74 @@ class UserStore:
         d = _task_row_to_dict(row)
         d["status"], d["done_at"] = "open", None
         return d
+
+    # ── conversations / chat messages ──
+    def create_conversation(self, first_message: str) -> dict:
+        conv_id = _sid()
+        now = _now_iso()
+        title = _derive_title(first_message)
+        self.conn.execute(
+            "INSERT INTO conversations (id, user_id, title, created_at, updated_at) VALUES (?,?,?,?,?)",
+            (conv_id, self.user_id, title, now, now),
+        )
+        self.conn.commit()
+        return {"id": conv_id, "title": title, "created_at": now, "updated_at": now}
+
+    def list_conversations(self) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT * FROM conversations WHERE user_id=? ORDER BY updated_at DESC", (self.user_id,)
+        )
+        return [_conversation_row_to_dict(r) for r in rows]
+
+    def _owns_conversation(self, conversation_id: str) -> bool:
+        return self.conn.execute(
+            "SELECT 1 FROM conversations WHERE id=? AND user_id=?", (conversation_id, self.user_id)
+        ).fetchone() is not None
+
+    def conversation_messages(self, conversation_id: str) -> list[dict] | None:
+        """None means "no such conversation for this user" — distinct from an
+        empty list, which shouldn't normally happen since a conversation only
+        exists once its first message has been added."""
+        if not self._owns_conversation(conversation_id):
+            return None
+        rows = self.conn.execute(
+            "SELECT * FROM chat_messages WHERE conversation_id=? ORDER BY created_at",
+            (conversation_id,),
+        )
+        return [_message_row_to_dict(r) for r in rows]
+
+    def add_message(self, conversation_id: str, role: str, content: str) -> None:
+        now = _now_iso()
+        self.conn.execute(
+            "INSERT INTO chat_messages (id, conversation_id, role, content, created_at) VALUES (?,?,?,?,?)",
+            (_sid(), conversation_id, role, content, now),
+        )
+        self.conn.execute(
+            "UPDATE conversations SET updated_at=? WHERE id=? AND user_id=?",
+            (now, conversation_id, self.user_id),
+        )
+        self.conn.commit()
+
+    def rename_conversation(self, conversation_id: str, title: str) -> dict | None:
+        row = self.conn.execute(
+            "SELECT * FROM conversations WHERE id=? AND user_id=?", (conversation_id, self.user_id)
+        ).fetchone()
+        if not row:
+            return None
+        self.conn.execute("UPDATE conversations SET title=? WHERE id=?", (title, conversation_id))
+        self.conn.commit()
+        d = _conversation_row_to_dict(row)
+        d["title"] = title
+        return d
+
+    def delete_conversation(self, conversation_id: str) -> bool:
+        if not self._owns_conversation(conversation_id):
+            return False
+        self.conn.execute("DELETE FROM chat_messages WHERE conversation_id=?", (conversation_id,))
+        self.conn.execute("DELETE FROM conversations WHERE id=? AND user_id=?",
+                           (conversation_id, self.user_id))
+        self.conn.commit()
+        return True
 
 
 _stores: dict[str, UserStore] = {}

@@ -95,6 +95,24 @@ CREATE TABLE IF NOT EXISTS digests (
     UNIQUE(user_id, kind, date)
 );
 CREATE INDEX IF NOT EXISTS idx_digests_user_date ON digests(user_id, date);
+
+CREATE TABLE IF NOT EXISTS conversations (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_conversations_user ON conversations(user_id, updated_at);
+
+CREATE TABLE IF NOT EXISTS chat_messages (
+    id TEXT PRIMARY KEY,
+    conversation_id TEXT NOT NULL,
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_conversation ON chat_messages(conversation_id, created_at);
 """
 
 _connections: dict[str, sqlite3.Connection] = {}

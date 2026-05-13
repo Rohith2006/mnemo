@@ -133,6 +133,113 @@ def test_reopen_task_ignores_unknown_or_still_open_id():
     assert s.reopen_task(added[0]["id"]) is None  # still open, not done
 
 
+# ── conversations / chat messages ───────────────────────────────────────────
+def test_create_conversation_derives_title_and_timestamps():
+    s = store.get_store("u1")
+    conv = s.create_conversation("What should I focus on today?")
+    assert conv["title"] == "What should I focus on today?"
+    assert conv["created_at"] == conv["updated_at"]
+    assert conv["id"]
+
+
+def test_create_conversation_truncates_long_title_on_word_boundary():
+    s = store.get_store("u1")
+    message = "This is a very long first message that definitely exceeds fifty characters in length"
+    conv = s.create_conversation(message)
+    assert len(conv["title"]) <= 51  # 50 chars + ellipsis
+    assert conv["title"].endswith("…")
+    assert not message.startswith(conv["title"][:-1] + "x")  # sanity: it's a real prefix
+    assert message.startswith(conv["title"][:-1])
+
+
+def test_create_conversation_hard_truncates_single_long_word():
+    s = store.get_store("u1")
+    message = "x" * 80
+    conv = s.create_conversation(message)
+    assert conv["title"] == "x" * 50 + "…"
+
+
+def test_list_conversations_orders_most_recently_updated_first():
+    s = store.get_store("u1")
+    first = s.create_conversation("First chat")
+    second = s.create_conversation("Second chat")
+    listed = s.list_conversations()
+    assert [c["id"] for c in listed] == [second["id"], first["id"]]
+
+    # Touching the older one (via add_message) should move it back to the front.
+    s.add_message(first["id"], "user", "another message")
+    listed_again = s.list_conversations()
+    assert [c["id"] for c in listed_again] == [first["id"], second["id"]]
+
+
+def test_add_message_appends_and_bumps_updated_at():
+    s = store.get_store("u1")
+    conv = s.create_conversation("Hello")
+    s.add_message(conv["id"], "user", "Hello")
+    s.add_message(conv["id"], "assistant", "Hi there!")
+    messages = s.conversation_messages(conv["id"])
+    assert [(m["role"], m["content"]) for m in messages] == [
+        ("user", "Hello"),
+        ("assistant", "Hi there!"),
+    ]
+    updated = [c for c in s.list_conversations() if c["id"] == conv["id"]][0]
+    assert updated["updated_at"] >= conv["updated_at"]
+
+
+def test_conversation_messages_returns_none_for_unknown_id():
+    s = store.get_store("u1")
+    assert s.conversation_messages("no-such-id") is None
+
+
+def test_conversation_messages_returns_none_for_another_users_conversation():
+    owner = store.get_store("u1")
+    other = store.get_store("u2")
+    conv = owner.create_conversation("Private chat")
+    assert other.conversation_messages(conv["id"]) is None
+
+
+def test_rename_conversation_updates_title_without_touching_updated_at():
+    s = store.get_store("u1")
+    conv = s.create_conversation("Original title")
+    renamed = s.rename_conversation(conv["id"], "New title")
+    assert renamed["title"] == "New title"
+    assert renamed["updated_at"] == conv["updated_at"]
+
+
+def test_rename_conversation_returns_none_for_unknown_or_foreign_id():
+    owner = store.get_store("u1")
+    other = store.get_store("u2")
+    conv = owner.create_conversation("Chat")
+    assert owner.rename_conversation("no-such-id", "New title") is None
+    assert other.rename_conversation(conv["id"], "Hijacked title") is None
+
+
+def test_delete_conversation_removes_conversation_and_its_messages():
+    s = store.get_store("u1")
+    conv = s.create_conversation("Chat")
+    s.add_message(conv["id"], "user", "Chat")
+    assert s.delete_conversation(conv["id"]) is True
+    assert s.conversation_messages(conv["id"]) is None
+    assert conv["id"] not in [c["id"] for c in s.list_conversations()]
+
+
+def test_delete_conversation_returns_false_for_unknown_or_foreign_id():
+    owner = store.get_store("u1")
+    other = store.get_store("u2")
+    conv = owner.create_conversation("Chat")
+    assert owner.delete_conversation("no-such-id") is False
+    assert other.delete_conversation(conv["id"]) is False
+
+
+def test_forget_all_wipes_conversations_and_messages():
+    s = store.get_store("u1")
+    conv = s.create_conversation("Chat")
+    s.add_message(conv["id"], "user", "Chat")
+    s.forget_all()
+    assert s.list_conversations() == []
+    assert s.conversation_messages(conv["id"]) is None
+
+
 def test_complete_tasks_matches_by_substring_either_direction():
     s = store.get_store("u1")
     s.add_tasks([{"task": "Submit the quarterly report"}])
