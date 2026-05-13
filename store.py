@@ -593,6 +593,10 @@ class UserStore:
         return [_message_row_to_dict(r) for r in rows]
 
     def add_message(self, conversation_id: str, role: str, content: str) -> None:
+        # Matches complete_task_by_id/reopen_task's pattern: check ownership
+        # here rather than trusting the caller to have checked separately.
+        if not self._owns_conversation(conversation_id):
+            return
         now = _now_iso()
         self.conn.execute(
             "INSERT INTO chat_messages (id, conversation_id, role, content, created_at) VALUES (?,?,?,?,?)",

@@ -186,6 +186,15 @@ def test_add_message_appends_and_bumps_updated_at():
     assert updated["updated_at"] >= conv["updated_at"]
 
 
+def test_add_message_silently_noops_for_unknown_or_foreign_conversation():
+    owner = store.get_store("u1")
+    other = store.get_store("u2")
+    conv = owner.create_conversation("Chat")
+    other.add_message(conv["id"], "user", "Hijack attempt")
+    owner.add_message("no-such-id", "user", "Also ignored")
+    assert [m["content"] for m in owner.conversation_messages(conv["id"])] == []
+
+
 def test_conversation_messages_returns_none_for_unknown_id():
     s = store.get_store("u1")
     assert s.conversation_messages("no-such-id") is None
