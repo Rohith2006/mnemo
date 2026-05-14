@@ -31,11 +31,24 @@ export type CaptureResponse = {
   reminder: ReminderOut | null;
 };
 
-export type ChatMessage = { role: "user" | "assistant"; content: string };
-
 export type ChatResponse = {
   reply: string;
+  conversation_id: string;
   reminder: ReminderOut | null;
+};
+
+export type ConversationOut = {
+  id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ChatMessageOut = {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  created_at: string;
 };
 
 export type TaskOut = {

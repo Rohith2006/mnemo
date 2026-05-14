@@ -1,6 +1,15 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./client";
-import type { CaptureResponse, ChatMessage, ChatResponse, DashboardOut, DigestOut, HabitOut, TaskOut } from "./types";
+import type {
+  CaptureResponse,
+  ChatMessageOut,
+  ChatResponse,
+  ConversationOut,
+  DashboardOut,
+  DigestOut,
+  HabitOut,
+  TaskOut,
+} from "./types";
 import { scheduleReminder, cancelReminder as cancelLocalReminder, cancelAll } from "../notifications";
 
 export function useDashboard() {
@@ -21,12 +30,45 @@ export function useCapture() {
 export function useChat() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ message, history }: { message: string; history: ChatMessage[] }) =>
-      api.post<ChatResponse>("/api/chat", { message, history }),
+    mutationFn: ({ message, conversationId }: { message: string; conversationId?: string }) =>
+      api.post<ChatResponse>("/api/chat", { message, conversation_id: conversationId }),
     onSuccess: async (res) => {
       qc.invalidateQueries({ queryKey: ["dashboard"] });
+      qc.invalidateQueries({ queryKey: ["conversations"] });
       if (res.reminder) await scheduleReminder(res.reminder);
     },
+  });
+}
+
+export function useConversations() {
+  return useQuery({
+    queryKey: ["conversations"],
+    queryFn: () => api.get<ConversationOut[]>("/api/conversations"),
+  });
+}
+
+export function useConversationMessages(conversationId: string | null) {
+  return useQuery({
+    queryKey: ["conversations", conversationId, "messages"],
+    queryFn: () => api.get<ChatMessageOut[]>(`/api/conversations/${conversationId}/messages`),
+    enabled: !!conversationId,
+  });
+}
+
+export function useRenameConversation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, title }: { id: string; title: string }) =>
+      api.patch<ConversationOut>(`/api/conversations/${id}`, { title }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["conversations"] }),
+  });
+}
+
+export function useDeleteConversation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete<void>(`/api/conversations/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["conversations"] }),
   });
 }
 
