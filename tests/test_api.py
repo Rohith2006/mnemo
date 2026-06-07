@@ -15,6 +15,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 import brain
+import store
 from api.main import app
 
 client = TestClient(app)
@@ -240,6 +241,50 @@ def test_chat_caps_llm_history_to_last_20_messages(auth_headers, fake_llm):
     last_prompt = [c for c in fake_llm.history if "warm, proactive personal assistant" in c][-1]
     assert "message 0" not in last_prompt
     assert "message 10" in last_prompt
+
+
+def test_chat_drops_orphaned_trailing_user_message_from_llm_history(auth_headers, fake_llm, monkeypatch):
+    """If a prior turn's LLM call failed after the user message was committed
+    but before the assistant reply got written, the conversation's stored
+    history ends in an unanswered "user" turn. The next turn must drop that
+    orphaned entry before appending its own user message, rather than sending
+    the LLM two consecutive "user"-role entries."""
+    fake_llm.reply = "First reply"
+    first = client.post("/api/chat", json={"message": "First message"}, headers=auth_headers)
+    conversation_id = first.json()["conversation_id"]
+
+    user_id = client.get("/api/me", headers=auth_headers).json()["user_id"]
+    store.get_store(user_id).add_message(
+        conversation_id, "user", "some later message that never got a reply"
+    )
+
+    captured_messages = []
+    underlying = fake_llm
+
+    def spying_llm(messages, **kwargs):
+        captured_messages.append(messages)
+        return underlying(messages, **kwargs)
+
+    monkeypatch.setattr(brain, "call_llm", spying_llm)
+    fake_llm.reply = "Second reply"
+
+    r = client.post(
+        "/api/chat",
+        json={"message": "Second message", "conversation_id": conversation_id},
+        headers=auth_headers,
+    )
+    assert r.status_code == 200
+
+    reply_calls = [
+        m for m in captured_messages
+        if any("warm, proactive personal assistant" in msg.get("content", "") for msg in m)
+    ]
+    assert reply_calls, "expected build_reply's LLM call to have been captured"
+    roles = [msg["role"] for msg in reply_calls[-1]]
+    consecutive_user_pairs = [
+        (a, b) for a, b in zip(roles, roles[1:]) if a == "user" and b == "user"
+    ]
+    assert not consecutive_user_pairs, f"found consecutive user-role entries in {roles}"
 
 
 # ── conversations ─────────────────────────────────────────────────────────────

@@ -58,6 +58,8 @@ export function useConversationMessages(conversationId: string | null) {
     queryKey: ["conversations", conversationId, "messages"],
     queryFn: () => api.get<ChatMessageOut[]>(`/api/conversations/${conversationId}/messages`),
     enabled: !!conversationId,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
 }
 
@@ -142,6 +144,7 @@ export function useForget() {
     onSuccess: async () => {
       await cancelAll(); // the server dropped the reminders; drop their local alarms too
       qc.invalidateQueries({ queryKey: ["dashboard"] });
+      qc.invalidateQueries({ queryKey: ["conversations"] }); // no `exact` — also drops every open thread's cached messages
     },
   });
 }

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, FlatList, View } from "react-native";
+import { ActivityIndicator, FlatList, KeyboardAvoidingView, Platform, View } from "react-native";
 import { useChat, useConversationMessages } from "../../api/hooks";
 import { ApiError } from "../../api/client";
 import { Callout } from "../Surfaces";
@@ -51,7 +51,7 @@ export function ChatThread({ conversationId }: { conversationId: string }) {
   const display = [...loaded, ...pending].slice().reverse(); // newest first, for the inverted list
 
   return (
-    <View style={{ flex: 1 }}>
+    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === "ios" ? "padding" : undefined} keyboardVerticalOffset={90}>
       {messagesQuery.isLoading ? (
         <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
           <ActivityIndicator color={t.inkFaint} />
@@ -107,6 +107,6 @@ export function ChatThread({ conversationId }: { conversationId: string }) {
         {!!error && <Callout text={error} tone="critical" />}
         <ChatComposer value={input} onChangeText={setInput} onSend={send} disabled={!input.trim() || chat.isPending} loading={chat.isPending} />
       </View>
-    </View>
+    </KeyboardAvoidingView>
   );
 }

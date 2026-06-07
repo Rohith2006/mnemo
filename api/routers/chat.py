@@ -41,6 +41,9 @@ def chat(body: ChatRequest, user: dict = Depends(get_current_user)):
     reminder_hit = brain.detect_reminder(body.message, tz)
     new_reminder = {"task": reminder_hit["task"], "seconds": reminder_hit["seconds"]} if reminder_hit else None
 
+    if prior_messages and prior_messages[-1]["role"] == "user":
+        prior_messages = prior_messages[:-1]  # a previous turn's LLM call failed after this was committed — drop it so it isn't immediately followed by this turn's own user message
+
     llm_history = [
         {"role": m["role"], "content": m["content"]} for m in prior_messages[-MAX_HISTORY_MESSAGES:]
     ]

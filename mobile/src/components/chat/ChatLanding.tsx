@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View } from "react-native";
+import { KeyboardAvoidingView, Platform, View } from "react-native";
 import { useChat } from "../../api/hooks";
 import { ApiError } from "../../api/client";
 import { MnemoMark } from "../Logo";
@@ -38,7 +38,11 @@ export function ChatLanding({
   };
 
   return (
-    <View style={{ flex: 1, justifyContent: "center", alignItems: "center", padding: space.xxl, gap: space.xl }}>
+    <KeyboardAvoidingView
+      style={{ flex: 1, justifyContent: "center", alignItems: "center", padding: space.xxl, gap: space.xl }}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      keyboardVerticalOffset={90}
+    >
       <MnemoMark size={40} animated color={t.ink} />
       <Text variant="title" style={{ textAlign: "center" }}>
         {greeting}
@@ -51,6 +55,6 @@ export function ChatLanding({
       <View style={{ width: "100%", maxWidth: 480 }}>
         <ChatComposer value={input} onChangeText={setInput} onSend={send} disabled={!input.trim() || chat.isPending} loading={chat.isPending} />
       </View>
-    </View>
+    </KeyboardAvoidingView>
   );
 }

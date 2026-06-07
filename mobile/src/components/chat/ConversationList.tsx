@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Alert, Platform, Pressable, TextInput, View } from "react-native";
+import { Alert, Platform, Pressable, ScrollView, TextInput, View } from "react-native";
 import { useDeleteConversation, useRenameConversation } from "../../api/hooks";
 import type { ConversationOut } from "../../api/types";
 import { IconButton } from "../Button";
@@ -78,11 +78,12 @@ export function ConversationList({
         <Text variant="bodyMedium">New chat</Text>
       </Pressable>
 
-      {conversations.length === 0 ? (
-        <EmptyRow>No chats yet. Send a message to start one.</EmptyRow>
-      ) : (
-        <Group>
-          {conversations.map((c, i) => (
+      <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
+        {conversations.length === 0 ? (
+          <EmptyRow>No chats yet. Send a message to start one.</EmptyRow>
+        ) : (
+          <Group>
+            {conversations.map((c, i) => (
             <View key={c.id} style={{ backgroundColor: c.id === activeId ? t.sunken : "transparent" }}>
               {editingId === c.id ? (
                 <View
@@ -129,8 +130,9 @@ export function ConversationList({
               )}
             </View>
           ))}
-        </Group>
-      )}
+          </Group>
+        )}
+      </ScrollView>
     </View>
   );
 }

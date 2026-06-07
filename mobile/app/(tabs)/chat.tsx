@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Pressable, useWindowDimensions, View } from "react-native";
 import { useAuth } from "../../src/auth/AuthContext";
 import { useConversations } from "../../src/api/hooks";
@@ -21,6 +21,13 @@ export default function ChatScreen() {
 
   const [activeId, setActiveId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+
+  useEffect(() => {
+    if (!activeId) return;
+    if (!conversationsQuery.isSuccess) return;
+    const stillExists = conversationsQuery.data.some((c) => c.id === activeId);
+    if (!stillExists) setActiveId(null);
+  }, [activeId, conversationsQuery.data, conversationsQuery.isSuccess]);
 
   const handleSelect = (id: string) => {
     setActiveId(id);
