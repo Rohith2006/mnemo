@@ -25,5 +25,6 @@ def log_habit(name: str, user: dict = Depends(get_current_user)):
     h = user_store.log_habit(name, on=datetime.now(tz).date())
     if not h:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "habit name required")
+    user_store.invalidate_today_digests(tz)
     return HabitOut(name=h["name"], streak=h.get("streak", 0), best_streak=h.get("best_streak", 0),
                      last_done=h.get("last_done"))

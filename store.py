@@ -463,6 +463,17 @@ class UserStore:
         )
         self.conn.commit()
 
+    def invalidate_today_digests(self, tz: ZoneInfo) -> None:
+        """Drop today's cached digests so the next fetch regenerates them. Called
+        after any mutation that could make a cached digest's claims stale (a new
+        task/fact/log entry, a completed task, a logged habit) — otherwise a
+        digest fetched once early in the day (even a near-empty first one) would
+        keep showing that same stale text regardless of everything captured
+        afterward, since nothing else ever expires the cache."""
+        today = datetime.now(tz).date().isoformat()
+        self.conn.execute("DELETE FROM digests WHERE user_id=? AND date=?", (self.user_id, today))
+        self.conn.commit()
+
     # ── views for prompts / dashboards ──
     def summary(self) -> str:
         """Compact snapshot injected into the chat system prompt."""

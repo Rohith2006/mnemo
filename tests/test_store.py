@@ -429,6 +429,22 @@ def test_digest_cache_roundtrip_and_overwrite():
     assert s.get_cached_digest("evening", "2026-08-17") is None  # different kind, no bleed
 
 
+def test_invalidate_today_digests_drops_only_todays_cache():
+    s = store.get_store("u1")
+    tz = ZoneInfo("Asia/Kolkata")
+    today = datetime.now(tz).date().isoformat()
+    yesterday = (datetime.now(tz).date() - timedelta(days=1)).isoformat()
+    s.save_digest("morning", today, "stale morning text")
+    s.save_digest("ondemand", today, "stale ondemand text")
+    s.save_digest("evening", yesterday, "yesterday's digest should survive")
+
+    s.invalidate_today_digests(tz)
+
+    assert s.get_cached_digest("morning", today) is None
+    assert s.get_cached_digest("ondemand", today) is None
+    assert s.get_cached_digest("evening", yesterday) == "yesterday's digest should survive"
+
+
 # ── forget ───────────────────────────────────────────────────────────────────
 def test_forget_all_wipes_every_bucket():
     s = store.get_store("u1")

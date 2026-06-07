@@ -245,6 +245,30 @@ def test_apply_extraction_handles_empty_data():
     assert brain.apply_extraction(s, None) == empty
 
 
+def test_apply_extraction_invalidates_todays_cached_digest():
+    """A digest fetched early in the day (even a near-empty first one) must not
+    keep showing stale text once real data has since been captured — nothing
+    else expires the per-day cache, so a real change has to."""
+    s = store.get_store("u1")
+    today = datetime.now(TZ).date().isoformat()
+    s.save_digest("morning", today, "stale text from before this fact existed")
+
+    brain.apply_extraction(s, {"facts": ["Lives in Bengaluru"]}, tz=TZ)
+
+    assert s.get_cached_digest("morning", today) is None
+
+
+def test_apply_extraction_leaves_digest_cache_alone_when_nothing_changed():
+    s = store.get_store("u1")
+    today = datetime.now(TZ).date().isoformat()
+    s.save_digest("morning", today, "still valid")
+
+    brain.apply_extraction(s, {}, tz=TZ)
+    brain.apply_extraction(s, {"facts": []}, tz=TZ)
+
+    assert s.get_cached_digest("morning", today) == "still valid"
+
+
 def test_apply_extraction_ignores_invalid_mood_score():
     s = store.get_store("u1")
     changed = brain.apply_extraction(s, {"mood": {"score": "not-a-number"}})

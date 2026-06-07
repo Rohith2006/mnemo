@@ -238,6 +238,8 @@ def apply_extraction(store, data: dict, tz: ZoneInfo | None = None) -> dict:
             changed["mood"] = store.add_journal(int(mood["score"]), mood.get("note", ""))
         except (TypeError, ValueError):
             pass
+    if tz and any(changed.values()):
+        store.invalidate_today_digests(tz)
     return changed
 
 

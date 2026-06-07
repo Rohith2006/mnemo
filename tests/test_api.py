@@ -445,6 +445,38 @@ def test_unknown_digest_kind_404s(auth_headers):
     assert r.status_code == 404
 
 
+def test_capturing_new_data_invalidates_cached_digest(auth_headers, fake_llm):
+    """Regression test: a digest fetched before any real data existed must not
+    keep showing that same stale text once something has actually been
+    captured — the mobile client never passes refresh=true on its own, so
+    this has to happen automatically or the digest looks permanently broken."""
+    fake_llm.digest = "stale, nothing going on"
+    client.get("/api/digests/morning", headers=auth_headers)
+
+    fake_llm.extraction = {"facts": ["Lives in Bengaluru"]}
+    client.post("/api/capture", json={"text": "I live in Bengaluru"}, headers=auth_headers)
+
+    fake_llm.digest = "fresh, reflects the new fact"
+    r = client.get("/api/digests/morning", headers=auth_headers)
+    assert r.json()["text"] == "fresh, reflects the new fact"
+
+
+def test_completing_a_task_invalidates_cached_digest(auth_headers, fake_llm):
+    """Same regression, but through the no-LLM direct-action path (Track tab's
+    tap-to-complete) rather than through capture/chat's extraction."""
+    r = client.post("/api/tasks", json={"task": "Buy milk"}, headers=auth_headers)
+    task_id = r.json()[0]["id"]
+
+    fake_llm.digest = "stale, milk still on the list"
+    client.get("/api/digests/morning", headers=auth_headers)
+
+    client.post(f"/api/tasks/{task_id}/complete", headers=auth_headers)
+
+    fake_llm.digest = "fresh, milk is done"
+    r = client.get("/api/digests/morning", headers=auth_headers)
+    assert r.json()["text"] == "fresh, milk is done"
+
+
 # ── account ───────────────────────────────────────────────────────────────────
 def test_forget_wipes_data(auth_headers, fake_llm):
     fake_llm.extraction = {"facts": ["some fact"]}
