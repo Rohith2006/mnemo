@@ -1,169 +1,106 @@
 import React, { useState } from "react";
-import { FlatList, KeyboardAvoidingView, Platform, TextInput, useWindowDimensions, View } from "react-native";
-import { useChat } from "../../src/api/hooks";
-import { ApiError } from "../../src/api/client";
-import { SendButton } from "../../src/components/Button";
-import { MnemoMark } from "../../src/components/Logo";
-import { contentPadding, LargeTitle, Screen, TopBar, useScrollHeader } from "../../src/components/Screen";
-import { Callout } from "../../src/components/Surfaces";
-import { Text } from "../../src/components/Text";
-import { stripMarkdown } from "../../src/utils/text";
-import { radius, space, type as typeScale, useTheme } from "../../src/theme";
-import type { ChatMessage } from "../../src/api/types";
+import { Pressable, useWindowDimensions, View } from "react-native";
+import { useAuth } from "../../src/auth/AuthContext";
+import { useConversations } from "../../src/api/hooks";
+import { ChatLanding } from "../../src/components/chat/ChatLanding";
+import { ChatThread } from "../../src/components/chat/ChatThread";
+import { ConversationList } from "../../src/components/chat/ConversationList";
+import { Icon } from "../../src/components/Icon";
+import { Screen, TopBar } from "../../src/components/Screen";
+import { iconSize, space, useTheme } from "../../src/theme";
 
-type Bubble = ChatMessage & { id: string };
+const WIDE_BREAKPOINT = 700;
+const SIDEBAR_WIDTH = 280;
 
 export default function ChatScreen() {
   const t = useTheme();
   const { width } = useWindowDimensions();
-  const pad = contentPadding(width);
-  const { scrolled, scrollProps } = useScrollHeader();
+  const isWide = width >= WIDE_BREAKPOINT;
+  const { user } = useAuth();
+  const conversationsQuery = useConversations();
 
-  const chat = useChat();
-  const [messages, setMessages] = useState<Bubble[]>([]);
-  const [input, setInput] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
-  const send = () => {
-    const text = input.trim();
-    if (!text) return;
-    const history = messages.map(({ role, content }) => ({ role, content }));
-    setMessages((prev) => [{ id: `${Date.now()}-u`, role: "user", content: text }, ...prev]);
-    setInput("");
-    setError(null);
-
-    chat.mutate(
-      { message: text, history },
-      {
-        onSuccess: (res) =>
-          setMessages((prev) => [
-            { id: `${Date.now()}-a`, role: "assistant", content: stripMarkdown(res.reply) },
-            ...prev,
-          ]),
-        onError: (e) =>
-          setError(e instanceof ApiError ? e.message : "That did not go through. Try again."),
-      },
-    );
+  const handleSelect = (id: string) => {
+    setActiveId(id);
+    setDrawerOpen(false);
   };
+  const handleNewChat = () => {
+    setActiveId(null);
+    setDrawerOpen(false);
+  };
+
+  const sidebar = (
+    <ConversationList
+      conversations={conversationsQuery.data ?? []}
+      activeId={activeId}
+      onSelect={handleSelect}
+      onNewChat={handleNewChat}
+    />
+  );
 
   return (
     <Screen>
-      <TopBar title="Chat" showTitle={scrolled || messages.length > 0} />
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-        keyboardVerticalOffset={90}
-      >
-        <FlatList
-          {...scrollProps}
-          data={messages}
-          keyExtractor={(m) => m.id}
-          inverted={messages.length > 0}
-          keyboardShouldPersistTaps="handled"
-          contentContainerStyle={{
-            paddingHorizontal: pad,
-            paddingTop: space.lg,
-            paddingBottom: space.lg,
-          }}
-          renderItem={({ item }) =>
-            item.role === "user" ? (
-              <View
-                style={{
-                  alignSelf: "flex-end",
-                  maxWidth: "84%",
-                  backgroundColor: t.sunken,
-                  borderRadius: radius.lg,
-                  paddingVertical: space.md,
-                  paddingHorizontal: space.lg,
-                  marginBottom: space.lg,
-                }}
-              >
-                <Text variant="body">{item.content}</Text>
-              </View>
-            ) : (
-              // No bubble. A hairline rule marks it as mnemo speaking, the way a
-              // quoted block reads in a document.
-              <View
-                style={{
-                  borderLeftWidth: 2,
-                  borderLeftColor: t.hairlineStrong,
-                  paddingLeft: space.lg,
-                  marginBottom: space.xxl,
-                }}
-              >
-                <Text variant="body">{item.content}</Text>
-              </View>
-            )
-          }
-          ListEmptyComponent={
-            // Top-aligned, so the large title sits where it does on every other screen.
-            <View style={{ paddingTop: space.md }}>
-              <LargeTitle title="Chat" subtitle="For thinking something through out loud." />
-              <View style={{ gap: space.sm }}>
-                <MnemoMark size={22} />
-                <Text variant="callout" tone="faint" style={{ maxWidth: 320 }}>
-                  Ask about anything you have logged. For quick entries, Capture is faster and gives you a
-                  record instead of a reply.
-                </Text>
-              </View>
-            </View>
-          }
-        />
+      <TopBar
+        title="Chat"
+        showTitle
+        leading={
+          !isWide ? (
+            <Pressable
+              onPress={() => setDrawerOpen(true)}
+              accessibilityRole="button"
+              accessibilityLabel="Open chat history"
+              hitSlop={space.md}
+            >
+              <Icon name="sidebar" size={iconSize.md} color={t.ink} />
+            </Pressable>
+          ) : undefined
+        }
+      />
+      <View style={{ flex: 1, flexDirection: "row" }}>
+        {isWide && (
+          <View style={{ width: SIDEBAR_WIDTH, borderRightWidth: 1, borderRightColor: t.hairline }}>
+            {sidebar}
+          </View>
+        )}
+        <View style={{ flex: 1 }}>
+          {activeId ? (
+            <ChatThread key={activeId} conversationId={activeId} />
+          ) : (
+            <ChatLanding
+              userName={user?.name ?? ""}
+              tz={user?.tz ?? "Asia/Kolkata"}
+              onStarted={setActiveId}
+            />
+          )}
+        </View>
+      </View>
 
-        <View
-          style={{
-            paddingHorizontal: pad,
-            paddingTop: space.md,
-            paddingBottom: space.md,
-            borderTopWidth: 1,
-            borderTopColor: t.hairline,
-            backgroundColor: t.canvas,
-          }}
-        >
-          {!!error && <Callout text={error} tone="critical" />}
+      {!isWide && drawerOpen && (
+        <>
+          <Pressable
+            onPress={() => setDrawerOpen(false)}
+            accessibilityRole="button"
+            accessibilityLabel="Close chat history"
+            style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: t.overlay }}
+          />
           <View
             style={{
-              flexDirection: "row",
-              alignItems: "flex-end",
-              gap: space.sm,
-              backgroundColor: t.surface,
-              borderWidth: 1,
-              borderColor: t.hairline,
-              borderRadius: radius.xl,
-              paddingLeft: space.lg,
-              paddingRight: space.xs,
-              paddingVertical: space.xs,
+              position: "absolute",
+              top: 0,
+              left: 0,
+              bottom: 0,
+              width: SIDEBAR_WIDTH,
+              backgroundColor: t.canvas,
+              borderRightWidth: 1,
+              borderRightColor: t.hairline,
             }}
           >
-            <TextInput
-              value={input}
-              onChangeText={setInput}
-              placeholder="Ask mnemo"
-              placeholderTextColor={t.inkFaint}
-              multiline
-              accessibilityLabel="Message"
-              // Enter sends, Shift+Enter inserts a newline — calling preventDefault
-              // here stops both the browser's own newline insertion and RNW's
-              // internal onSubmitEditing/blur handling for this keystroke.
-              onKeyPress={(e: any) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  send();
-                }
-              }}
-              style={[
-                typeScale.body,
-                { flex: 1, color: t.ink, maxHeight: 120, paddingVertical: space.sm },
-                // The browser's default focus ring on a web <textarea> would
-                // otherwise show alongside this component's own border — an
-                // RNW-only style extension @types/react-native doesn't model.
-                { outlineStyle: "none" } as object,
-              ]}
-            />
-            <SendButton onPress={send} disabled={!input.trim()} loading={chat.isPending} />
+            {sidebar}
           </View>
-        </View>
-      </KeyboardAvoidingView>
+        </>
+      )}
     </Screen>
   );
 }
