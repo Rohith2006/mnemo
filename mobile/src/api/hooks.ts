@@ -34,7 +34,13 @@ export function useChat() {
       api.post<ChatResponse>("/api/chat", { message, conversation_id: conversationId }),
     onSuccess: async (res) => {
       qc.invalidateQueries({ queryKey: ["dashboard"] });
-      qc.invalidateQueries({ queryKey: ["conversations"] });
+      // exact: true — otherwise this partial-matches and also invalidates
+      // ["conversations", id, "messages"] for whichever thread is currently
+      // open, background-refetching it. That refetch would then duplicate
+      // the just-sent exchange alongside ChatThread's own optimistic
+      // `pending` state (which isn't cleared until the user switches
+      // conversations), rendering every sent message twice.
+      qc.invalidateQueries({ queryKey: ["conversations"], exact: true });
       if (res.reminder) await scheduleReminder(res.reminder);
     },
   });
@@ -60,7 +66,10 @@ export function useRenameConversation() {
   return useMutation({
     mutationFn: ({ id, title }: { id: string; title: string }) =>
       api.patch<ConversationOut>(`/api/conversations/${id}`, { title }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["conversations"] }),
+    // exact: true for the same reason as useChat above — renaming one
+    // conversation shouldn't refetch whichever different conversation's
+    // thread happens to be open at the time.
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["conversations"], exact: true }),
   });
 }
 
@@ -68,7 +77,10 @@ export function useDeleteConversation() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.delete<void>(`/api/conversations/${id}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["conversations"] }),
+    // exact: true for the same reason as useChat above — deleting one
+    // conversation shouldn't refetch whichever different conversation's
+    // thread happens to be open at the time.
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["conversations"], exact: true }),
   });
 }
 
