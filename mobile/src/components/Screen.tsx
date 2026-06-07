@@ -32,11 +32,17 @@ export function TopBar({
   showTitle,
   leading,
   trailing,
+  alwaysShowLeading = false,
 }: {
   title: string;
   showTitle: boolean;
   leading?: React.ReactNode;
   trailing?: React.ReactNode;
+  /** Show `leading` even while the title is visible — for a screen with no
+   * large title of its own to hand off to, like Chat's persistent drawer
+   * trigger. Defaults to false, so every other screen's collapsing-header
+   * behavior (leading only pre-scroll) is unaffected. */
+  alwaysShowLeading?: boolean;
 }) {
   const t = useTheme();
   const insets = useSafeAreaInsets();
@@ -58,7 +64,9 @@ export function TopBar({
           paddingHorizontal: space.xl,
         }}
       >
-        <View style={{ flex: 1, alignItems: "flex-start" }}>{!showTitle && leading}</View>
+        <View style={{ flex: 1, alignItems: "flex-start" }}>
+          {(alwaysShowLeading || !showTitle) && leading}
+        </View>
         <View style={{ flex: 2, alignItems: "center" }}>
           {showTitle && (
             <Text variant="headline" numberOfLines={1}>

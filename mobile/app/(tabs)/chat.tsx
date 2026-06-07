@@ -45,6 +45,7 @@ export default function ChatScreen() {
       <TopBar
         title="Chat"
         showTitle
+        alwaysShowLeading
         leading={
           !isWide ? (
             <Pressable
