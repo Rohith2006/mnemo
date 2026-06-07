@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Pressable, useWindowDimensions, View } from "react-native";
 import { useAuth } from "../../src/auth/AuthContext";
 import { useConversations } from "../../src/api/hooks";
@@ -22,11 +22,21 @@ export default function ChatScreen() {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
+  // Tracks every id we've ever actually seen the server confirm, so a freshly
+  // created conversation (whose id we set optimistically in onStarted, before
+  // the invalidated ["conversations"] refetch has had a chance to complete)
+  // isn't mistaken for one that's been deleted out from under us.
+  const seenIds = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!conversationsQuery.data) return;
+    for (const c of conversationsQuery.data) seenIds.current.add(c.id);
+  }, [conversationsQuery.data]);
+
   useEffect(() => {
     if (!activeId) return;
     if (!conversationsQuery.isSuccess) return;
     const stillExists = conversationsQuery.data.some((c) => c.id === activeId);
-    if (!stillExists) setActiveId(null);
+    if (!stillExists && seenIds.current.has(activeId)) setActiveId(null);
   }, [activeId, conversationsQuery.data, conversationsQuery.isSuccess]);
 
   const handleSelect = (id: string) => {
