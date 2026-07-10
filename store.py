@@ -94,6 +94,7 @@ def _user_row_to_dict(r: sqlite3.Row) -> dict:
     return {
         "user_id": r["user_id"], "email": r["email"], "password_hash": r["password_hash"],
         "name": r["name"], "tz": r["tz"], "created_at": r["created_at"],
+        "push_enabled": bool(r["push_enabled"]),
     }
 
 
@@ -472,6 +473,47 @@ class UserStore:
         afterward, since nothing else ever expires the cache."""
         today = datetime.now(tz).date().isoformat()
         self.conn.execute("DELETE FROM digests WHERE user_id=? AND date=?", (self.user_id, today))
+        self.conn.commit()
+
+    # ── push notifications ──
+    def add_push_token(self, token: str, platform: str) -> None:
+        # ON CONFLICT(token): the same physical token can re-register under a
+        # different user_id (logout/login as someone else on the same device)
+        # — ownership must move to the new account, not duplicate or stick
+        # with the old one.
+        self.conn.execute(
+            "INSERT INTO push_tokens (id, user_id, token, platform, created_at) VALUES (?,?,?,?,?) "
+            "ON CONFLICT(token) DO UPDATE SET user_id=excluded.user_id, platform=excluded.platform, "
+            "created_at=excluded.created_at",
+            (_sid(), self.user_id, token, platform, _now_iso()),
+        )
+        self.conn.commit()
+
+    def push_tokens(self) -> list[str]:
+        rows = self.conn.execute(
+            "SELECT token FROM push_tokens WHERE user_id=?", (self.user_id,)
+        )
+        return [r["token"] for r in rows]
+
+    def remove_push_token(self, token: str) -> None:
+        self.conn.execute(
+            "DELETE FROM push_tokens WHERE user_id=? AND token=?", (self.user_id, token)
+        )
+        self.conn.commit()
+
+    def has_pushed(self, kind: str, ref_id: str) -> bool:
+        row = self.conn.execute(
+            "SELECT 1 FROM push_log WHERE user_id=? AND kind=? AND ref_id=?",
+            (self.user_id, kind, ref_id),
+        ).fetchone()
+        return row is not None
+
+    def log_push_sent(self, kind: str, ref_id: str) -> None:
+        self.conn.execute(
+            "INSERT INTO push_log (id, user_id, kind, ref_id, sent_at) VALUES (?,?,?,?,?) "
+            "ON CONFLICT(user_id, kind, ref_id) DO NOTHING",
+            (_sid(), self.user_id, kind, ref_id, _now_iso()),
+        )
         self.conn.commit()
 
     # ── views for prompts / dashboards ──

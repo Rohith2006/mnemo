@@ -113,6 +113,24 @@ CREATE TABLE IF NOT EXISTS chat_messages (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_chat_messages_conversation ON chat_messages(conversation_id, created_at);
+
+CREATE TABLE IF NOT EXISTS push_tokens (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    token TEXT NOT NULL UNIQUE,
+    platform TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_push_tokens_user ON push_tokens(user_id);
+
+CREATE TABLE IF NOT EXISTS push_log (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    ref_id TEXT NOT NULL,
+    sent_at TEXT NOT NULL,
+    UNIQUE(user_id, kind, ref_id)
+);
 """
 
 _connections: dict[str, sqlite3.Connection] = {}
@@ -125,6 +143,9 @@ ADDED_COLUMNS = {
     "facts": [
         ("updated_at", "TEXT"),
         ("active", "INTEGER NOT NULL DEFAULT 1"),
+    ],
+    "users": [
+        ("push_enabled", "INTEGER NOT NULL DEFAULT 1"),
     ],
 }
 

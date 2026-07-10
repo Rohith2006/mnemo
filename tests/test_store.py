@@ -445,6 +445,66 @@ def test_invalidate_today_digests_drops_only_todays_cache():
     assert s.get_cached_digest("evening", yesterday) == "yesterday's digest should survive"
 
 
+# ── push tokens/log ─────────────────────────────────────────────────────────
+def test_add_push_token_then_list_and_remove():
+    s = store.get_store("u1")
+    assert s.push_tokens() == []
+    s.add_push_token("ExponentPushToken[aaa]", "ios")
+    s.add_push_token("ExponentPushToken[bbb]", "android")
+    assert set(s.push_tokens()) == {"ExponentPushToken[aaa]", "ExponentPushToken[bbb]"}
+
+    s.remove_push_token("ExponentPushToken[aaa]")
+    assert s.push_tokens() == ["ExponentPushToken[bbb]"]
+
+
+def test_add_push_token_reregistering_same_token_does_not_duplicate():
+    s = store.get_store("u1")
+    s.add_push_token("ExponentPushToken[aaa]", "ios")
+    s.add_push_token("ExponentPushToken[aaa]", "ios")  # e.g. app reopened
+    assert s.push_tokens() == ["ExponentPushToken[aaa]"]
+
+
+def test_push_token_reregistering_under_a_different_user_moves_ownership():
+    """The same physical token re-registering under a different account (e.g.
+    after logging out and into a different account on the same device) must
+    end up owned by the new account, not duplicated or left with the old one."""
+    s1 = store.get_store("u1")
+    s2 = store.get_store("u2")
+    s1.add_push_token("ExponentPushToken[shared]", "ios")
+    s2.add_push_token("ExponentPushToken[shared]", "ios")
+    assert s1.push_tokens() == []
+    assert s2.push_tokens() == ["ExponentPushToken[shared]"]
+
+
+def test_has_pushed_and_log_push_sent():
+    s = store.get_store("u1")
+    assert s.has_pushed("overdue_task", "task-123") is False
+    s.log_push_sent("overdue_task", "task-123")
+    assert s.has_pushed("overdue_task", "task-123") is True
+    assert s.has_pushed("morning_digest", "2026-08-31") is False  # different kind, no bleed
+
+
+def test_log_push_sent_is_idempotent():
+    s = store.get_store("u1")
+    s.log_push_sent("morning_digest", "2026-08-31")
+    s.log_push_sent("morning_digest", "2026-08-31")  # must not raise (UNIQUE constraint)
+    assert s.has_pushed("morning_digest", "2026-08-31") is True
+
+
+def test_registry_get_and_all_include_push_enabled_default_true():
+    u = store.registry.create("push@example.com", "hashed", name="Push Test")
+    assert u["push_enabled"] is True
+    fetched = store.registry.get(u["user_id"])
+    assert fetched["push_enabled"] is True
+    assert store.registry.all()[u["user_id"]]["push_enabled"] is True
+
+
+def test_registry_set_push_enabled_false():
+    u = store.registry.create("push2@example.com", "hashed")
+    store.registry.set(u["user_id"], push_enabled=0)
+    assert store.registry.get(u["user_id"])["push_enabled"] is False
+
+
 # ── forget ───────────────────────────────────────────────────────────────────
 def test_forget_all_wipes_every_bucket():
     s = store.get_store("u1")
