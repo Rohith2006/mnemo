@@ -111,8 +111,6 @@ export default function ChatScreen() {
               bottom: 0,
               width: SIDEBAR_WIDTH,
               backgroundColor: t.canvas,
-              borderRightWidth: 1,
-              borderRightColor: t.hairline,
             }}
           >
             {sidebar}
