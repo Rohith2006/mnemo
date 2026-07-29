@@ -134,6 +134,25 @@ def test_run_tick_before_8am_sends_no_morning_digest(fake_expo, monkeypatch):
     assert calls == []
 
 
+def test_run_tick_cold_catchup_after_8pm_sends_evening_only_not_morning(fake_expo, monkeypatch):
+    """The exact scenario the morning window's upper bound exists for: a
+    user's very first tick of the day lands at/after 20:00 (e.g. the server
+    was down all day) — must send the evening digest and must NOT also fire
+    a "Good morning" push hours late. Regression test for a real defect
+    caught during Task 2's review: the unbounded morning check this plan
+    originally specified would have fired both simultaneously here."""
+    calls, _ = fake_expo
+    u = _make_user()
+    store.get_store(u["user_id"]).add_push_token("ExponentPushToken[x]", "ios")
+    monkeypatch.setattr(brain, "build_digest", lambda store, tz, kind: f"{kind} digest.")
+    _freeze(monkeypatch, datetime(2026, 8, 31, 21, 0))
+
+    push.run_tick()
+
+    assert len(calls) == 1
+    assert calls[0][1]["body"] == "evening digest."
+
+
 def test_run_tick_evening_digest_includes_at_risk_habit_line(fake_expo, monkeypatch):
     calls, _ = fake_expo
     u = _make_user()
