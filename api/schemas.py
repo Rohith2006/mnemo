@@ -22,6 +22,7 @@ class UserOut(BaseModel):
     email: str
     name: str
     tz: str
+    push_enabled: bool
 
 
 class TokenResponse(BaseModel):
@@ -33,6 +34,7 @@ class TokenResponse(BaseModel):
 class UpdateMeRequest(BaseModel):
     name: str | None = None
     tz: str | None = None
+    push_enabled: bool | None = None
 
     @field_validator("tz")
     @classmethod
@@ -46,6 +48,11 @@ class UpdateMeRequest(BaseModel):
         except (ZoneInfoNotFoundError, ValueError):
             raise ValueError(f"unknown timezone: {v}")
         return v
+
+
+class PushTokenRegister(BaseModel):
+    token: str = Field(min_length=1)
+    platform: str = Field(min_length=1)
 
 
 # ── capture / chat ────────────────────────────────────────────────────────────

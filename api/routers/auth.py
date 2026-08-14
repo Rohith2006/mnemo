@@ -10,7 +10,8 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 def _token_response(user: dict) -> TokenResponse:
     return TokenResponse(
         access_token=create_access_token(user["user_id"]),
-        user=UserOut(user_id=user["user_id"], email=user["email"], name=user["name"], tz=user["tz"]),
+        user=UserOut(user_id=user["user_id"], email=user["email"], name=user["name"], tz=user["tz"],
+                     push_enabled=user["push_enabled"]),
     )
 
 

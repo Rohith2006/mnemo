@@ -568,3 +568,30 @@ def test_habit_logged_by_tap_is_dated_in_the_users_timezone(auth_headers, foreig
 
     habits = client.get("/api/habits", headers=auth_headers).json()
     assert habits[0]["last_done"] == datetime.now(ZoneInfo(foreign_tz)).date().isoformat()
+
+
+# ── push notifications ───────────────────────────────────────────────────────
+def test_register_push_token(auth_headers):
+    r = client.post(
+        "/api/push/register",
+        json={"token": "ExponentPushToken[abc]", "platform": "ios"},
+        headers=auth_headers,
+    )
+    assert r.status_code == 204
+
+
+def test_register_push_token_requires_auth():
+    r = client.post("/api/push/register", json={"token": "x", "platform": "ios"})
+    assert r.status_code == 401
+
+
+def test_me_includes_push_enabled_default_true(auth_headers):
+    r = client.get("/api/me", headers=auth_headers)
+    assert r.json()["push_enabled"] is True
+
+
+def test_update_me_can_disable_push(auth_headers):
+    r = client.patch("/api/me", json={"push_enabled": False}, headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json()["push_enabled"] is False
+    assert client.get("/api/me", headers=auth_headers).json()["push_enabled"] is False

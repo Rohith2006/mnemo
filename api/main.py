@@ -20,14 +20,21 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+import push as push_module
+
 from api import auth as auth_module
-from api.routers import account, auth, capture, chat, conversations, dashboard, digests, habits, reminders, tasks
+from api.routers import account, auth, capture, chat, conversations, dashboard, digests, habits, push, reminders, tasks
 
 if auth_module.JWT_SECRET == auth_module._DEV_SECRET:
     print("[api] WARNING: MNEMO_JWT_SECRET not set — using an insecure default dev secret. "
           "Set it in .env before exposing this server beyond your own machine.")
 
 app = FastAPI(title="mnemo API")
+
+
+@app.on_event("startup")
+def _start_push_scheduler():
+    push_module.start_scheduler()
 
 # LAN-only personal app — no browser cookie exposure, bearer tokens only, so a
 # permissive CORS policy here doesn't create the risk it would for a cookie-auth app.
@@ -39,7 +46,8 @@ app.add_middleware(
 )
 
 for router in (auth.router, account.router, dashboard.router, capture.router, chat.router,
-               conversations.router, tasks.router, habits.router, reminders.router, digests.router):
+               conversations.router, tasks.router, habits.router, reminders.router, digests.router,
+               push.router):
     app.include_router(router)
 
 
