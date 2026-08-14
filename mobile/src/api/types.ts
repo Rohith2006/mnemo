@@ -5,6 +5,7 @@ export type UserOut = {
   email: string;
   name: string;
   tz: string;
+  push_enabled: boolean;
 };
 
 export type TokenResponse = {

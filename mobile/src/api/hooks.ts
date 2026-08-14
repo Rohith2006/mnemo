@@ -9,6 +9,7 @@ import type {
   DigestOut,
   HabitOut,
   TaskOut,
+  UserOut,
 } from "./types";
 import { scheduleReminder, cancelReminder as cancelLocalReminder, cancelAll } from "../notifications";
 
@@ -146,5 +147,12 @@ export function useForget() {
       qc.invalidateQueries({ queryKey: ["dashboard"] });
       qc.invalidateQueries({ queryKey: ["conversations"] }); // no `exact` — also drops every open thread's cached messages
     },
+  });
+}
+
+export function useUpdateMe() {
+  return useMutation({
+    mutationFn: (body: { name?: string; tz?: string; push_enabled?: boolean }) =>
+      api.patch<UserOut>("/api/me", body),
   });
 }
