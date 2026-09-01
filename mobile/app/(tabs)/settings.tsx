@@ -1,7 +1,7 @@
 import React from "react";
-import { Alert, Platform, ScrollView, useWindowDimensions, View } from "react-native";
+import { Alert, Platform, ScrollView, Switch, useWindowDimensions, View } from "react-native";
 import { useAuth } from "../../src/auth/AuthContext";
-import { useForget } from "../../src/api/hooks";
+import { useForget, useUpdateMe } from "../../src/api/hooks";
 import { Group, Row, SectionHeader } from "../../src/components/List";
 import { MnemoMark } from "../../src/components/Logo";
 import { contentPadding, LargeTitle, Screen, TopBar, useScrollHeader } from "../../src/components/Screen";
@@ -14,8 +14,13 @@ export default function SettingsScreen() {
   const pad = contentPadding(width);
   const { scrolled, scrollProps } = useScrollHeader();
 
-  const { user, serverUrl, logout } = useAuth();
+  const { user, serverUrl, logout, refreshMe } = useAuth();
   const forget = useForget();
+  const updateMe = useUpdateMe();
+
+  const togglePush = (value: boolean) => {
+    updateMe.mutate({ push_enabled: value }, { onSuccess: () => refreshMe() });
+  };
 
   const confirmForget = () => {
     const message =
@@ -46,6 +51,17 @@ export default function SettingsScreen() {
           <Row first icon="user" title="Name" value={user?.name || "Not set"} />
           <Row icon="email" title="Email" value={user?.email || "Not set"} />
           <Row icon="timezone" title="Timezone" value={user?.tz || "Not set"} />
+          <Row
+            icon="reminder"
+            title="Push notifications"
+            trailing={
+              <Switch
+                value={!!user?.push_enabled}
+                onValueChange={togglePush}
+                disabled={updateMe.isPending}
+              />
+            }
+          />
           <Row icon="server" title="Server" value={serverUrl || "Not set"} />
         </Group>
 
