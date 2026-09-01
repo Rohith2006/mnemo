@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Pressable, useWindowDimensions, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth } from "../../src/auth/AuthContext";
 import { useConversations } from "../../src/api/hooks";
 import { ChatLanding } from "../../src/components/chat/ChatLanding";
@@ -14,6 +15,7 @@ const SIDEBAR_WIDTH = 280;
 
 export default function ChatScreen() {
   const t = useTheme();
+  const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const isWide = width >= WIDE_BREAKPOINT;
   const { user } = useAuth();
@@ -110,6 +112,7 @@ export default function ChatScreen() {
               left: 0,
               bottom: 0,
               width: SIDEBAR_WIDTH,
+              paddingTop: insets.top,
               backgroundColor: t.canvas,
             }}
           >
