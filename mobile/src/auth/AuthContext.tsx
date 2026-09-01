@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { api, ApiError, getServerUrl, setServerUrl as persistServerUrl, getToken, setToken, clearToken } from "../api/client";
 import type { TokenResponse, UserOut } from "../api/types";
+import { registerForPush } from "../notifications/push";
 
 type AuthState = {
   loading: boolean;
@@ -47,12 +48,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const res = await api.post<TokenResponse>("/auth/signup", { email, password, name }, false);
     await setToken(res.access_token);
     setUser(res.user);
+    registerForPush();
   }, []);
 
   const login = useCallback(async (email: string, password: string) => {
     const res = await api.post<TokenResponse>("/auth/login", { email, password }, false);
     await setToken(res.access_token);
     setUser(res.user);
+    registerForPush();
   }, []);
 
   const logout = useCallback(async () => {
