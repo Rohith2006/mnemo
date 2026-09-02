@@ -19,6 +19,7 @@ import { contentPadding, LargeTitle, Screen, TopBar, useScrollHeader } from "../
 import { Callout, Card } from "../../src/components/Surfaces";
 import { Text } from "../../src/components/Text";
 import { reconcile } from "../../src/notifications";
+import { registerForPush } from "../../src/notifications/push";
 import { stripMarkdown } from "../../src/utils/text";
 import { iconSize, space, type as typeScale, useTheme } from "../../src/theme";
 import type { CaptureResponse } from "../../src/api/types";
@@ -45,6 +46,11 @@ export default function CaptureScreen() {
 
   useEffect(() => {
     if (dash?.reminders?.length) reconcile(dash.reminders);
+    // Self-heals a push-token registration that was pruned (correctly, e.g.
+    // after a reinstall, or incorrectly by a since-fixed bug) — this is
+    // idempotent server-side (ON CONFLICT(token) DO UPDATE in store.py), so
+    // calling it on every dashboard load is safe and cheap.
+    registerForPush();
   }, [dash?.reminders]);
 
   const submit = () => {

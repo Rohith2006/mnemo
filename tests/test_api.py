@@ -581,7 +581,10 @@ def test_register_push_token(auth_headers):
 
 
 def test_register_push_token_requires_auth():
-    r = client.post("/api/push/register", json={"token": "x", "platform": "ios"})
+    r = client.post(
+        "/api/push/register",
+        json={"token": "ExponentPushToken[aaaaaaaaaaaaaaaaaaaaaa]", "platform": "ios"},
+    )
     assert r.status_code == 401
 
 

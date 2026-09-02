@@ -22,6 +22,9 @@ secondary Chat tab exists for open-ended conversation.
   moment a reminder is detected; no server push infrastructure required.
 - **Proactive insight** — morning/evening/on-demand digests, streak/deadline
   alerts, computed live and shown in-app.
+- **Push notifications** — an in-process scheduler ticks every few minutes and
+  sends real Expo push notifications for overdue tasks and morning/evening
+  digests, so proactive insight reaches the user without opening the app.
 - **Multi-user** — email/password auth, JWT bearer tokens, per-user data.
 
 ## Architecture
@@ -31,7 +34,8 @@ secondary Chat tab exists for open-ended conversation.
 | `db.py`     | SQLite schema + connection layer (WAL mode) |
 | `store.py`  | Persistence — `UserStore` / `UserRegistry` / `ReminderStore` on top of `db.py` |
 | `brain.py`  | LLM client (Anthropic or Groq, via `LLM_PROVIDER`), extraction, reminder detection, reply + digest generation |
-| `api/`      | FastAPI backend — auth, capture/chat (the core product split), tasks/habits, reminders, digests |
+| `push.py`   | In-process APScheduler tick — sends real Expo push notifications for overdue tasks and morning/evening digests |
+| `api/`      | FastAPI backend — auth, capture/chat (the core product split), tasks/habits, reminders, digests, push registration |
 | `mobile/`   | Expo (React Native + TypeScript) app — the only frontend |
 | `tests/`    | pytest suite — no network calls, LLM calls are mocked |
 

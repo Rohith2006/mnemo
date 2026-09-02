@@ -1,8 +1,12 @@
 """Pydantic request/response models for the mobile API."""
 
+import re
+from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
+
+_EXPO_PUSH_TOKEN_RE = re.compile(r"^Expo(nent)?PushToken\[.+\]$")
 
 
 # ── auth ──────────────────────────────────────────────────────────────────────
@@ -52,7 +56,19 @@ class UpdateMeRequest(BaseModel):
 
 class PushTokenRegister(BaseModel):
     token: str = Field(min_length=1)
-    platform: str = Field(min_length=1)
+    platform: Literal["ios", "android"]
+
+    @field_validator("token")
+    @classmethod
+    def _looks_like_an_expo_push_token(cls, v: str) -> str:
+        # Real tokens look like "ExponentPushToken[xxxxxxxxxxxxxxxxxxxxxx]" or
+        # "ExpoPushToken[...]" — reject anything else early rather than
+        # storing a garbage value send_push would only fail on later.
+        if not _EXPO_PUSH_TOKEN_RE.match(v):
+            raise ValueError(
+                'not a valid Expo push token — expected "ExponentPushToken[...]" or "ExpoPushToken[...]"'
+            )
+        return v
 
 
 # ── capture / chat ────────────────────────────────────────────────────────────

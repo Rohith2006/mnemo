@@ -1,8 +1,10 @@
 // Reminders are scheduled as local, on-device notifications the moment the
 // server confirms one, with no push infrastructure involved. This is what makes
 // reminders work even though the backend is LAN-only: the phone alarms
-// itself. Digests/nudges are NOT handled here: those are pull/in-app only,
-// computed live from /api/dashboard.
+// itself. Digests/nudges (overdue tasks, morning/evening digests) are NOT
+// handled here — those are real server-initiated pushes, sent by the
+// backend's push.py (an in-process APScheduler tick) and registered for via
+// ./push.ts's registerForPush(), not scheduled client-side like reminders are.
 import * as Notifications from "expo-notifications";
 import { Platform } from "react-native";
 import { getItem, setItem } from "../storage";

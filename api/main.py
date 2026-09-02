@@ -14,6 +14,17 @@ try:  # must run before any module-level os.getenv() call below (api.auth reads 
 except ImportError:
     pass
 
+import logging
+from contextlib import asynccontextmanager
+
+# Nothing else in this app configures logging, so without this, module-level
+# loggers like push.py's (logging.getLogger(__name__)) are silently dropped —
+# the root logger's default level is WARNING and it has no handler of its
+# own, so an INFO record never reaches the console. This is what makes
+# push.py's start/shutdown log lines actually show up in uvicorn's own
+# startup/shutdown output instead of disappearing into the void.
+logging.basicConfig(level=logging.INFO, format="%(levelname)s:%(name)s: %(message)s")
+
 import anthropic
 import groq
 from fastapi import FastAPI
@@ -29,12 +40,15 @@ if auth_module.JWT_SECRET == auth_module._DEV_SECRET:
     print("[api] WARNING: MNEMO_JWT_SECRET not set — using an insecure default dev secret. "
           "Set it in .env before exposing this server beyond your own machine.")
 
-app = FastAPI(title="mnemo API")
 
-
-@app.on_event("startup")
-def _start_push_scheduler():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     push_module.start_scheduler()
+    yield
+    push_module.shutdown_scheduler()
+
+
+app = FastAPI(title="mnemo API", lifespan=lifespan)
 
 # LAN-only personal app — no browser cookie exposure, bearer tokens only, so a
 # permissive CORS policy here doesn't create the risk it would for a cookie-auth app.

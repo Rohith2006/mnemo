@@ -9,7 +9,7 @@ uvicorn[standard]>=0.32
 pydantic[email]>=2.9
 pyjwt>=2.9
 bcrypt>=4.2
-apscheduler>=3.10                     # in-process background scheduler for push notifications
+apscheduler>=3.10,<4                  # in-process background scheduler for push notifications; 4.x is a breaking rewrite
 
 # Tests
 pytest>=8

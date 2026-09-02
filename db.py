@@ -19,7 +19,8 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash TEXT NOT NULL,
     name TEXT NOT NULL DEFAULT '',
     tz TEXT NOT NULL DEFAULT 'Asia/Kolkata',
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    push_enabled INTEGER NOT NULL DEFAULT 1
 );
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 

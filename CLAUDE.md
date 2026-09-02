@@ -53,11 +53,15 @@ functions and a `store.py` `UserStore`/`UserRegistry`/`ReminderStore` instance.
 - **`db.py`** — SQLite connection + schema (WAL mode, one file at `data/mnemo.db` unless
   `MNEMO_DB_PATH` is set). Connections are cached per-path in a module-level dict; tests override
   the path and call `reset_connections()` between runs. Tables: `users` (accounts: email/password
-  hash/tz), `facts`, `log_entries`, `tasks`, `habits`, `journal`, `reminders`, `digests` (per-user
-  per-kind per-day cache). No migration framework — this is pre-production, schema changes are made
-  directly. The one exception: `ADDED_COLUMNS` in `db.py` ALTERs in columns added after the first
-  DBs were created, since `CREATE TABLE IF NOT EXISTS` silently skips an existing table. Add to it
-  when adding a column to an existing table.
+  hash/tz/`push_enabled`), `facts`, `log_entries`, `tasks`, `habits`, `journal`, `reminders`,
+  `digests` (per-user per-kind per-day cache), `push_tokens` (a user's registered Expo push tokens,
+  one row per device), `push_log` (dedup record of what's already been pushed, keyed
+  `(user_id, kind, ref_id)` — `kind` is `overdue_task`/`morning_digest`/`evening_digest`). No
+  migration framework — this is pre-production, schema changes are made directly. The one
+  exception: `ADDED_COLUMNS` in `db.py` ALTERs in columns added after the first DBs were created,
+  since `CREATE TABLE IF NOT EXISTS` silently skips an existing table. Add to it when adding a
+  column to an existing table — it currently has entries for both `facts` and `users`
+  (`push_enabled`).
 - **`store.py`** — three repositories on top of `db.py`:
   - `UserStore` — per-user memory: `facts` (deduped case-insensitively, and *reconciled*:
     `update_fact`/`remove_facts` soft-delete a superseded row via `active=0` rather than deleting it,
@@ -97,6 +101,21 @@ functions and a `store.py` `UserStore`/`UserRegistry`/`ReminderStore` instance.
     generation, both driven by `store.summary()` + `store.trends()`.
   - `parse_json` — tolerant JSON extraction from LLM output; returns `None` on failure rather than
     raising. All call sites must handle `None`.
+- **`push.py`** — the server-initiated half of proactive notifications, on top of `brain.py`/
+  `store.py` like `api/` is, but with no HTTP dependency of its own. An in-process APScheduler
+  `BackgroundScheduler` (`start_scheduler`/`shutdown_scheduler`, wired into `api/main.py`'s
+  `lifespan`) ticks every 5 minutes and runs `run_tick`, which evaluates every push-enabled user
+  against three trigger kinds — overdue tasks (coalesced into one combined notification instead of
+  a burst when more than a couple are pending at once), and morning/evening digests (bounded to
+  `[08:00, 20:00)` and `[20:00, 24:00)` local respectively, so a stale "Good morning" never fires
+  late) — and sends real Expo push notifications via `send_push`. Digest text is generated through
+  the same `get_cached_digest`/`save_digest` cache `routers/digests.py` uses, so a push and an
+  in-app digest fetched the same day never disagree. A token is only ever pruned
+  (`remove_push_token`) when Expo explicitly reports it as invalid (`DeviceNotRegistered`/
+  `MismatchSenderId`) — any other failure (network error, timeout, non-2xx, unrecognized Expo error)
+  is treated as transient and retried next tick, never deleted. `run_tick` catches per-user so one
+  user's exception (or one token's failed send) never stops the tick for anyone else. Never runs a
+  real background thread under pytest (`PYTEST_CURRENT_TEST`) — tests call `run_tick()` directly.
 - **`api/`** — FastAPI backend, the only frontend surface now:
   - `auth.py` — bcrypt password hashing, PyJWT issuance/verification, `get_current_user` dependency
     (Bearer token → account dict). 30-day tokens, no refresh-token flow (YAGNI at this scale).
@@ -111,11 +130,17 @@ functions and a `store.py` `UserStore`/`UserRegistry`/`ReminderStore` instance.
   - `routers/tasks.py` / `habits.py` — direct-action endpoints (complete a task by id, log a habit
     by name) that bypass the LLM entirely, for tapping something that already exists in the UI.
   - `routers/digests.py` — cached per `(user, kind, date)` in the `digests` table; `?refresh=true`
-    bypasses the cache. No scheduler/background jobs exist — digests are generated lazily on
-    request, not pushed. There is deliberately no push-notification infrastructure: proactive
-    surfaces (alerts, digests) are pull/in-app only, computed live in `routers/dashboard.py` from
-    `overdue_tasks`/`habits_at_risk`/etc. Only reminders get real OS notifications, and those are
-    scheduled **client-side** (see `mobile/src/notifications/`) — the server never pushes anything.
+    bypasses the cache. In-app digests are still pull-on-request from here — `push.py` is what adds
+    a *pushed* copy of the same cached text on its own schedule (see the `push.py` bullet above),
+    not a replacement for this route.
+  - `routers/push.py` — `POST /api/push/register` (`{token, platform}` → 204) registers/updates a
+    device's Expo push token for the current user (`UserStore.add_push_token`, upserted by token so
+    re-registering the same physical token under a different account moves ownership rather than
+    duplicating). Proactive surfaces now have two paths: computed live and shown in-app
+    (`routers/dashboard.py`'s `overdue_tasks`/`habits_at_risk`/etc.), and pushed by `push.py`'s
+    scheduler when the app isn't open. Reminders remain the one exception scheduled **client-side**
+    (see `mobile/src/notifications/`) rather than through `push.py` — the phone alarms itself for
+    those rather than waiting on a server tick.
   - `main.py` registers a `fastapi.exception_handler` for `anthropic.APIError` that returns a clean
     502 JSON response. This matters beyond error messages: an *unhandled* exception is caught by
     Starlette's generic 500 handler, which does not flow back through `CORSMiddleware` the way a
@@ -130,15 +155,24 @@ functions and a `store.py` `UserStore`/`UserRegistry`/`ReminderStore` instance.
     `chat.tsx` (secondary, explicitly labeled as such in its own UI copy), `settings.tsx`.
   - `src/auth/AuthGate.tsx` — redirects between `(auth)` and `(tabs)` based on token validity;
     validated once at launch via `GET /api/me`.
-  - `src/notifications/` — schedules reminders as local, on-device notifications the moment the
-    server confirms one (`expo-notifications`, `SchedulableTriggerInputTypes.DATE`). This is what
-    makes reminders work despite the backend being LAN-only: the phone alarms itself, no push
-    infrastructure involved. `reconcile()` re-schedules any pending server reminder not yet
-    scheduled locally (covers reinstalls / a second device) — call it whenever dashboard data loads.
+  - `src/notifications/index.ts` — schedules reminders as local, on-device notifications the moment
+    the server confirms one (`expo-notifications`, `SchedulableTriggerInputTypes.DATE`). This is
+    what makes reminders work despite the backend being LAN-only: the phone alarms itself, still no
+    push infrastructure involved for this one surface specifically. `reconcile()` re-schedules any
+    pending server reminder not yet scheduled locally (covers reinstalls / a second device) — call
+    it whenever dashboard data loads.
+  - `src/notifications/push.ts` — the mobile half of real server-initiated push: `registerForPush()`
+    mints an Expo push token (`getExpoPushTokenAsync`, requires `app.json`'s `extra.eas.projectId`)
+    and posts it to `POST /api/push/register`. Called from login/signup (`AuthContext.tsx`) and
+    again from the Capture tab's dashboard-load effect (`app/(tabs)/index.tsx`, alongside
+    `reconcile()`) so a pruned or reinstalled token self-heals without requiring a fresh login.
+    Idempotent server-side, so calling it repeatedly is cheap. Never throws outward, same posture as
+    `scheduleReminder`.
   - `src/storage.ts` — SecureStore on native, AsyncStorage on web (SecureStore has no web impl).
   - Known limitation, by design: a reminder scheduled locally on one device won't fire on another
-    device signed into the same account. Solving that requires real push (Expo push tokens +
-    server-triggered send), explicitly deferred — don't "fix" this without discussing the tradeoff.
+    device signed into the same account — reminders still aren't ported onto the `push.py`/
+    `push.ts` infrastructure above (which only covers overdue-task and digest alerts today).
+    Explicitly deferred — don't "fix" this without discussing the tradeoff.
 
 ## Working in this repo
 
