@@ -106,9 +106,10 @@ functions and a `store.py` `UserStore`/`UserRegistry`/`ReminderStore` instance.
   `BackgroundScheduler` (`start_scheduler`/`shutdown_scheduler`, wired into `api/main.py`'s
   `lifespan`) ticks every 5 minutes and runs `run_tick`, which evaluates every push-enabled user
   against three trigger kinds — overdue tasks (coalesced into one combined notification instead of
-  a burst when more than a couple are pending at once), and morning/evening digests (bounded to
-  `[08:00, 20:00)` and `[20:00, 24:00)` local respectively, so a stale "Good morning" never fires
-  late) — and sends real Expo push notifications via `send_push`. Digest text is generated through
+  a burst when more than a couple are pending at once), morning digest (bounded to `[08:00, 20:00)`
+  local, so a stale "Good morning" never fires late), and evening digest (`>= 20:00` local,
+  deliberately unbounded above so a late-recovering server still sends it before midnight) — and
+  sends real Expo push notifications via `send_push`. Digest text is generated through
   the same `get_cached_digest`/`save_digest` cache `routers/digests.py` uses, so a push and an
   in-app digest fetched the same day never disagree. A token is only ever pruned
   (`remove_push_token`) when Expo explicitly reports it as invalid (`DeviceNotRegistered`/
